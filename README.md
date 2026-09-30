@@ -285,3 +285,23 @@ shared-autonomy-robot-learning/
     ├── diagrams/
     ├── screenshots/
     └── demos/
+
+
+That closes the repository-structure block.
+
+Then add only these two short sections:
+
+```markdown
+## Acknowledgements
+
+This thesis is being conducted at **University College London (UCL)** as visiting research for the MSc in **Robotics and Mechatronics Engineering at Politecnico di Milano**.
+
+The project builds on the private UCL `VLA_Benchmark` research repository, which provides existing MuJoCo, Franka, data-collection and VLA experimentation infrastructure.
+
+Existing UCL and third-party components are not claimed as my original work. My contributions and modifications will be identified explicitly as the project develops.
+
+## Project Status
+
+🚧 **Active MSc thesis research — 2026/2027**
+
+Implementation, experiments and results will be added progressively as the thesis develops.
