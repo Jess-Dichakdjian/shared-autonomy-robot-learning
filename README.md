@@ -285,13 +285,8 @@ shared-autonomy-robot-learning/
     ├── diagrams/
     ├── screenshots/
     └── demos/
+```
 
-
-That closes the repository-structure block.
-
-Then add only these two short sections:
-
-```markdown
 ## Acknowledgements
 
 This thesis is being conducted at **University College London (UCL)** as visiting research for the MSc in **Robotics and Mechatronics Engineering at Politecnico di Milano**.
@@ -304,4 +299,4 @@ Existing UCL and third-party components are not claimed as my original work. My 
 
 🚧 **Active MSc thesis research — 2026/2027**
 
-Implementation, experiments and results will be added progressively as the thesis develops.
+Implementation, experiments and results will be added progressively as the thesis develops.tion, experiments and results will be added progressively as the thesis develops.
