@@ -97,3 +97,24 @@ Unity XR interface for corrective demonstrations
 **Learning from correction**  
 - update uncertainty estimation
 - improve future policy performance offline
+
+## Current Implementation Status
+
+| Component | Status | Current State |
+|---|---|---|
+| Literature review & system design | ✅ Completed | Research direction, system architecture and planned experimental pipeline defined |
+| Diffusion Policy | 🟡 Initial testing | Existing implementation downloaded, configured and used for small-scale testing |
+| VLA model | 🟡 In progress | Currently working on VLA integration and evaluation |
+| MuJoCo manipulation environment | 🟡 Existing baseline / integration in progress | Thesis builds on an existing UCL Franka MuJoCo benchmark |
+| Manipulation task | 🟡 In development | Square manipulation is the main target task; simpler tasks may be used for debugging |
+| Gaussian Process uncertainty estimation | ⚪ Planned | Intended to provide uncertainty / variance estimates during policy execution |
+| Uncertainty-triggered intervention | ⚪ Planned | Decision logic for requesting human correction has not yet been implemented |
+| Unity / XR interface | ⚪ Planned | Will adapt XR teleoperation work developed during a previous robotics project |
+| Human corrective demonstrations | ⚪ Planned | Corrective trajectory collection will be integrated later in the project |
+| Online uncertainty-model update | ⚪ Planned | Intended to incorporate information from human corrective demonstrations |
+| Offline policy improvement | ⚪ Planned | Corrective demonstrations are intended for later policy fine-tuning / improvement |
+| Integrated shared-autonomy pipeline | ⚪ Planned | Full end-to-end system has not yet been implemented |
+| Experimental evaluation | ⚪ Not started | No final quantitative results are available yet |
+
+**Status key:**  
+✅ Completed · 🟡 In progress / partially implemented · ⚪ Planned
