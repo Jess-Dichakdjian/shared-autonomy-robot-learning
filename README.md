@@ -39,3 +39,61 @@ The objective is to develop and evaluate a shared-autonomy pipeline in which:
 The project is focused on **robotic manipulation with a Franka manipulator in MuJoCo**, with the broader goal of studying how human corrections can be incorporated efficiently into robot-learning systems.
 
 
+## Planned System Pipeline
+
+The current thesis is organised around the following **conceptual shared-autonomy pipeline**:
+
+1. A **robot manipulation task** is defined in simulation  
+   - current focus: **square manipulation**
+   - **lift/can** tasks may be used as debugging baselines
+
+2. The system receives **live environmental observations**, including:
+   - simulated camera images
+   - robot joint states
+
+3. These observations feed **two parallel components**:
+
+   **Primary Action Engine**
+   - Diffusion Policy **or**
+   - Vision-Language-Action (VLA) model
+
+   **Secondary Estimator**
+   - Gaussian Process Regression
+   - used for uncertainty / variance tracking
+
+4. The **primary action engine** produces robot actions for the control loop.
+
+5. In parallel, the **secondary estimator** monitors whether the current state is associated with **high uncertainty** or possible **out-of-distribution (OOD)** behaviour.
+
+6. A decision is then made:
+   - if uncertainty is low, the system continues autonomous execution
+   - if uncertainty is high, autonomy is paused and human intervention is requested
+
+7. When intervention is needed, the operator provides a **corrective demonstration** through a **Unity XR interface**.
+
+8. The corrective trajectory is collected and intended to support two stages of improvement:
+   - **Stage 1:** real-time or near-real-time update of the uncertainty estimator
+   - **Stage 2:** offline policy improvement / fine-tuning using corrective human demonstrations
+
+### Pipeline Summary
+
+**Task**  
+Robot manipulation in simulation
+
+**Observations**  
+Camera images + robot joint states
+
+**Parallel modules**  
+- learned policy (Diffusion Policy / VLA)
+- uncertainty estimator (Gaussian Process Regression)
+
+**Decision logic**  
+- low uncertainty → continue autonomy  
+- high uncertainty / OOD → pause autonomy and request correction
+
+**Human-in-the-loop correction**  
+Unity XR interface for corrective demonstrations
+
+**Learning from correction**  
+- update uncertainty estimation
+- improve future policy performance offline
