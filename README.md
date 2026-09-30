@@ -118,3 +118,170 @@ Unity XR interface for corrective demonstrations
 
 **Status key:**  
 ✅ Completed · 🟡 In progress / partially implemented · ⚪ Planned
+
+
+
+## Project Scope and Contribution
+
+This thesis builds on an existing private UCL research repository, **`VLA_Benchmark`**, which provides baseline infrastructure for robot-learning experiments.
+
+### Existing UCL Baseline
+
+The upstream UCL repository already contains components including:
+
+- a MuJoCo simulation environment
+- a Franka manipulator model and simulation assets
+- data-collection utilities
+- existing VLA experimentation code
+- infrastructure for connecting learned policies to the simulation
+
+These components were **not originally developed by me**.
+
+### My Thesis Work
+
+My work focuses on extending this baseline toward an **uncertainty-aware shared-autonomy system**.
+
+My current and planned contributions include:
+
+- evaluating and integrating learned manipulation policies
+- investigating Diffusion Policy and VLA approaches for action generation
+- developing an uncertainty-estimation component based on Gaussian Process Regression
+- designing logic for detecting high-uncertainty / out-of-distribution situations
+- integrating an XR-based interface for human corrective demonstrations
+- collecting corrective trajectories during human intervention
+- investigating how corrective demonstrations can update the uncertainty model
+- investigating offline policy improvement using collected corrections
+- designing and evaluating the complete shared-autonomy pipeline
+
+The distinction between **existing UCL infrastructure**, **third-party research code**, and **my own implementation** will be maintained throughout this repository.
+
+
+
+
+## Technology Stack
+
+### Currently Used
+
+- **Python** — model experimentation and robotics research workflow
+- **MuJoCo** — manipulation simulation
+- **Franka Emika Panda** — target manipulator
+- **Diffusion Policy** — initial policy experimentation
+- **Vision-Language-Action Models** — current research and integration focus
+- **Linux** — development environment
+- **Git / GitHub** — version control and research workflow
+
+### Planned Components
+
+- **Gaussian Process Regression** — uncertainty estimation
+- **Unity** — operator-side XR environment
+- **XR / Meta Quest** — human corrective demonstrations
+- **Human-in-the-loop learning** — intervention and corrective trajectory collection
+
+> Technologies listed as planned are part of the thesis methodology but have not yet been fully implemented.
+
+---
+
+## Experimental Task
+
+The primary manipulation task planned for the thesis is the **Square task**.
+
+Simpler manipulation tasks such as **Lift** or **Can** may be used as debugging and validation baselines before evaluating the complete system on the target task.
+
+The experimental setup is intended to evaluate both:
+
+- autonomous manipulation performance
+- the behaviour of the uncertainty-aware intervention mechanism
+
+---
+
+## Research Questions
+
+The thesis investigates questions including:
+
+1. Can uncertainty estimation identify situations in which a learned manipulation policy is likely to behave unreliably?
+2. Can human intervention be requested selectively rather than requiring continuous teleoperation?
+3. Can corrective demonstrations improve the system's understanding of uncertain states?
+4. Can collected corrections subsequently improve manipulation-policy performance?
+5. How do different action-generation approaches, such as Diffusion Policies and VLA models, behave within the shared-autonomy framework?
+
+These questions define the current research direction and may be refined as implementation and experimentation progress.
+
+---
+
+## Evaluation Plan
+
+The final evaluation methodology is still under development.
+
+Planned evaluation areas include:
+
+### Manipulation Performance
+
+Potential measures include:
+
+- task success rate
+- task completion behaviour
+- policy failures
+- intervention frequency
+
+### Uncertainty Estimation
+
+The uncertainty estimator will be investigated in terms of its ability to distinguish between:
+
+- familiar states
+- uncertain states
+- potentially out-of-distribution observations or behaviours
+
+### Human Intervention
+
+Corrective demonstrations will be evaluated based on factors such as:
+
+- when intervention is triggered
+- whether the correction allows task recovery
+- the amount of human intervention required
+
+### Learning from Corrections
+
+Later experiments are intended to investigate whether collected human corrections can improve:
+
+- uncertainty estimation
+- future autonomous behaviour
+- policy performance after offline updating or fine-tuning
+
+> Exact metrics and experimental protocols will be added once the implementation and evaluation methodology are finalised.
+
+---
+
+## Repository Structure
+
+This repository is being developed alongside the thesis and will expand as implementation progresses.
+
+The intended structure is:
+
+```text
+shared-autonomy-robot-learning/
+│
+├── README.md
+│
+├── docs/
+│   ├── architecture.md
+│   ├── methodology.md
+│   └── experiments.md
+│
+├── src/
+│   ├── policies/
+│   ├── uncertainty/
+│   ├── shared_autonomy/
+│   └── xr_interface/
+│
+├── scripts/
+│
+├── configs/
+│
+├── results/
+│   ├── figures/
+│   └── tables/
+│
+└── media/
+    ├── diagrams/
+    ├── screenshots/
+    └── demos/
