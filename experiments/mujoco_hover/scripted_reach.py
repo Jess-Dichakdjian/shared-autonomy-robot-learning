@@ -14,6 +14,7 @@ import mujoco.viewer
 import numpy as np
 
 from trajectory_logger import EpisodeLogger
+from policy_interface import ActionLimits, PolicyObservation, RobotAction, ScriptedPolicy, VLAAdapter
 
 
 INITIAL_ARM_Q = np.array([0.0, -0.58, 0.0, -1.68, 0.0, 1.13, 0.8])
@@ -23,6 +24,7 @@ LOG_PERIOD = 0.1
 CONTROL_PERIOD = 0.02
 SUCCESS_TOLERANCE = 0.02
 SUCCESS_HOLD_TIME = 0.5
+INSTRUCTION = "Move the open gripper to hover 10 cm above the red cube."
 POSITION_GAIN = 2.0
 ORIENTATION_GAIN = 1.0
 MAX_JOINT_SPEED = 0.35
@@ -71,14 +73,31 @@ def main():
     parser.add_argument("--timeout", type=float, default=10.0, help="task timeout in simulated seconds")
     parser.add_argument("--settle", type=float, default=1.0, help="initial object settling time in seconds")
     parser.add_argument("--log-dir", type=Path, default=Path("recordings"))
+    parser.add_argument("--scene", type=Path, help="MuJoCo scene XML; defaults to the scene beside this script or in the current directory")
     parser.add_argument("--randomize-cube", action="store_true", help="sample the red cube position in a small tested-area neighborhood")
     parser.add_argument("--seed", type=int, default=42, help="repeatable random seed used with --randomize-cube")
+    parser.add_argument(
+        "--policy-mode",
+        choices=("scripted", "vla-stub-scripted-fallback"),
+        default="scripted",
+        help="select the scripted baseline or VLAAdapter with its scripted fallback",
+    )
     args = parser.parse_args()
     if args.timeout <= 0 or args.settle < 0:
         parser.error("--timeout must be positive and --settle cannot be negative")
 
     script_dir = Path(__file__).resolve().parent
-    model = mujoco.MjModel.from_xml_path(str(script_dir / "franka_emika_panda" / "scene.xml"))
+    scene_candidates = [script_dir / "franka_emika_panda" / "scene.xml",
+                        Path.cwd() / "franka_emika_panda" / "scene.xml"]
+    scene_path = args.scene.expanduser().resolve() if args.scene else next(
+        (candidate.resolve() for candidate in scene_candidates if candidate.is_file()), None
+    )
+    if scene_path is None or not scene_path.is_file():
+        raise FileNotFoundError(
+            "MuJoCo scene not found. Pass --scene or run from a directory containing "
+            "franka_emika_panda/scene.xml."
+        )
+    model = mujoco.MjModel.from_xml_path(str(scene_path))
     data = mujoco.MjData(model)
     if model.nu != 8 or model.nv < 7:
         raise RuntimeError(f"Expected the single Panda model (nu=8), got nu={model.nu}, nv={model.nv}")
@@ -151,6 +170,39 @@ def main():
             qpos_addresses = model.jnt_qposadr[:7]
             dof_addresses = model.jnt_dofadr[:7]
             joint_target = data.qpos[qpos_addresses].copy()
+            action_limits = ActionLimits.from_mujoco(
+                model, max_joint_speed_rad_s=MAX_JOINT_SPEED
+            )
+
+            def scripted_controller(observation: PolicyObservation) -> RobotAction:
+                nonlocal joint_target
+                qdot, _ = differential_ik(
+                    model,
+                    data,
+                    hand_id,
+                    waypoints[waypoint_index],
+                    target_rotation,
+                )
+                joint_target = joint_target + qdot * CONTROL_PERIOD
+                return RobotAction(joint_target, gripper_finger_position_m=0.04)
+
+            scripted_policy = ScriptedPolicy(scripted_controller)
+            if args.policy_mode == "vla-stub-scripted-fallback":
+                policy = VLAAdapter(fallback_policy=scripted_policy)
+                policy_name = "VLAAdapter"
+                policy_mode = "scripted_fallback_no_model"
+            else:
+                policy = scripted_policy
+                policy_name = "ScriptedPolicy"
+                policy_mode = "scripted_baseline"
+
+            def request_action(observation: PolicyObservation) -> RobotAction:
+                if isinstance(policy, VLAAdapter):
+                    return policy.predict(observation, instruction=INSTRUCTION)
+                return policy.predict(observation)
+
+            last_requested_action = RobotAction(joint_target, 0.04)
+            last_safe_action = last_requested_action
             success_elapsed = 0.0
             result = "timeout"
             reason = "target tolerance was not held before timeout"
@@ -160,13 +212,31 @@ def main():
                     result, reason = "aborted", "viewer closed by user"
                     break
                 if step % control_steps == 0:
-                    qdot, tcp_position = differential_ik(
-                        model, data, hand_id, waypoints[waypoint_index], target_rotation
+                    tcp_position, _ = tcp_pose(model, data, hand_id)
+                    observation = PolicyObservation(
+                        instruction=INSTRUCTION,
+                        seed=args.seed if args.randomize_cube else None,
+                        sim_time_s=float(data.time),
+                        robot_state={
+                            "joint_position_rad": data.qpos[qpos_addresses].copy(),
+                            "joint_velocity_rad_s": data.qvel[dof_addresses].copy(),
+                            "gripper_finger_position_m": float(np.mean(data.qpos[7:9])),
+                            "tcp_position_m": tcp_position.copy(),
+                            "cube_position_m": data.xpos[cube_id].copy(),
+                            "active_waypoint_m": waypoints[waypoint_index].copy(),
+                        },
                     )
-                    joint_target = joint_target + qdot * (control_steps * model.opt.timestep)
-                    joint_target = np.clip(joint_target, model.actuator_ctrlrange[:7, 0],
-                                           model.actuator_ctrlrange[:7, 1])
-                    data.ctrl[:7] = joint_target
+                    last_requested_action = request_action(observation)
+                    previous_safe_action = last_safe_action
+                    last_safe_action = action_limits.clamp(
+                        last_requested_action,
+                        previous_joint_target_rad=previous_safe_action.arm_joint_position_rad,
+                        previous_gripper_target_m=previous_safe_action.gripper_finger_position_m,
+                        dt_s=control_steps * model.opt.timestep,
+                    )
+                    joint_target = last_safe_action.arm_joint_position_rad.copy()
+                    data.ctrl[:7] = last_safe_action.arm_joint_position_rad
+                    data.ctrl[7] = last_safe_action.gripper_finger_position_m / 0.04 * 255.0
                     position_error = float(np.linalg.norm(waypoints[waypoint_index] - tcp_position))
                     if waypoint_index < len(waypoints) - 1:
                         waypoint_hold = waypoint_hold + control_steps * model.opt.timestep if position_error <= 0.035 else 0.0
@@ -189,9 +259,35 @@ def main():
                     q_current = data.qpos[qpos_addresses].copy()
                     q_velocity = data.qvel[dof_addresses].copy()
                     current_error = float(np.linalg.norm(final_target_position - tcp_position))
+                    logged_observation = PolicyObservation(
+                        instruction=INSTRUCTION,
+                        seed=args.seed if args.randomize_cube else None,
+                        sim_time_s=float(data.time),
+                        robot_state={
+                            "joint_position_rad": q_current,
+                            "joint_velocity_rad_s": q_velocity,
+                            "gripper_finger_position_m": float(np.mean(data.qpos[7:9])),
+                            "tcp_position_m": tcp_position,
+                            "tcp_quaternion_wxyz": data.xquat[hand_id].copy(),
+                            "cube_position_m": data.xpos[cube_id].copy(),
+                            "target_position_m": final_target_position,
+                            "active_waypoint_m": waypoints[waypoint_index],
+                        },
+                        static_rgb=static_rgb,
+                        wrist_rgb=wrist_rgb,
+                        metadata={"controller_mode": waypoint_names[waypoint_index]},
+                    )
                     logger.log({
                         "sim_time_s": float(data.time),
-                        "instruction": "Move the open gripper to hover 10 cm above the red cube.",
+                        "instruction": INSTRUCTION,
+                        "seed": args.seed if args.randomize_cube else None,
+                        "policy": policy_name,
+                        "policy_mode": policy_mode,
+                        "episode_outcome": "running",
+                        "observation": logged_observation.to_record(),
+                        "requested_action": last_requested_action.to_record(),
+                        "clamped_action": last_safe_action.to_record(),
+                        "action": last_safe_action.to_record(),
                         "controller_mode": waypoint_names[waypoint_index],
                         "joint_position_rad": q_current.tolist(),
                         "joint_velocity_rad_s": q_velocity.tolist(),
@@ -218,8 +314,11 @@ def main():
             return {
                 "result": result,
                 "reason": reason,
-                "instruction": "Move the open gripper to hover 10 cm above the red cube.",
-                "scene_xml": "franka_emika_panda/scene.xml",
+                "instruction": INSTRUCTION,
+                "policy": policy_name,
+                "policy_mode": policy_mode,
+                "model_inference_called": False,
+                "scene_xml": str(scene_path),
                 "scene_commit": "708bfc8c67ecdd232e3130736055cf0856f1685d",
                 "seed": args.seed if args.randomize_cube else None,
                 "cube_randomized_xy_m": sampled_cube_xy.tolist() if sampled_cube_xy is not None else None,

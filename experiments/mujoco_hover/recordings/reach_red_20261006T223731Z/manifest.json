@@ -1,0 +1,79 @@
+{
+  "result": "success",
+  "reason": "TCP stayed within tolerance for the required hold time",
+  "instruction": "Move the open gripper to hover 10 cm above the red cube.",
+  "policy": "VLAAdapter",
+  "policy_mode": "scripted_fallback_no_model",
+  "model_inference_called": false,
+  "scene_xml": "C:\\Users\\alexd.BEAST\\Documents\\Codex\\VLA_Benchmark\\mujoco\\franka_emika_panda\\scene.xml",
+  "scene_commit": "708bfc8c67ecdd232e3130736055cf0856f1685d",
+  "seed": 72,
+  "cube_randomized_xy_m": [
+    0.53378367344738,
+    -0.22959949263929544
+  ],
+  "cube_randomization_bounds_m": {
+    "x": [
+      0.45,
+      0.55
+    ],
+    "y": [
+      -0.23,
+      -0.17
+    ]
+  },
+  "mujoco_version": "3.15.0",
+  "numpy_version": "2.5.3",
+  "opencv_version": "5.0.0",
+  "physics_timestep_s": 0.002,
+  "logging_period_s": 0.1,
+  "settle_time_s": 1.0,
+  "timeout_s": 10.0,
+  "success_tolerance_m": 0.02,
+  "success_hold_time_s": 0.5,
+  "tcp_local_offset_m": [
+    0.0,
+    0.0,
+    0.105
+  ],
+  "initial_tcp_position_m": [
+    0.29533153370992604,
+    -2.5480732124236215e-06,
+    0.6785039034189432
+  ],
+  "cube_initial_position_m": [
+    0.5337835761512402,
+    -0.22959950446972485,
+    0.3298922445798458
+  ],
+  "target_position_m": [
+    0.5337835761512402,
+    -0.22959950446972485,
+    0.4598922445798458
+  ],
+  "waypoints_m": [
+    [
+      0.29533153370992604,
+      -2.5480732124236215e-06,
+      0.6785039034189432
+    ],
+    [
+      0.5337835761512402,
+      -0.22959950446972485,
+      0.6785039034189432
+    ],
+    [
+      0.5337835761512402,
+      -0.22959950446972485,
+      0.4598922445798458
+    ]
+  ],
+  "final_tcp_position_m": [
+    0.5300624337312444,
+    -0.2302661686999532,
+    0.46405397897991046
+  ],
+  "final_target_error_m": 0.005622399427507764,
+  "logged_frames": 63,
+  "ended_utc": "2026-10-06T22:37:37.338811+00:00"
+}
