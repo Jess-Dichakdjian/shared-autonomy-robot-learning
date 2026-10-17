@@ -113,14 +113,7 @@ same machine if possible, and record its GPU, dtype, latency and versions.
 Remote inference is technically possible, but adds a policy-server/network
 boundary that this LIBERO evaluator has not implemented or validated.
 
-LeRobot's π0.5 processor construction tried to fetch the gated
-`google/paligemma-3b-pt-224` tokenizer and received HTTP 401 in this environment.
-Actual inference therefore also needs authorized Hugging Face access to that
-tokenizer and a local pretrained checkpoint (or access to the appropriate Hub
-checkpoint). The mock path intentionally uses LeRobot's actual LIBERO
-observation and environment action pipelines, without requesting that tokenizer
-or downloading model weights. The existing `from_pretrained` adapter remains
-the swap-in path once model access and compute are available.
+Hugging Face authentication was verified in WSL and only google/paligemma-3b-pt-224/config.json was explicitly downloaded. Building LeRobot's π0.5 processors then initialized the real GemmaTokenizer and policy/environment pipelines. The tokenizer cache contains vocabulary/config assets (including a 17.5 MB tokenizer.json); no policy weight file was downloaded. An opt-in test passes synthetic LIBERO-compatible observations through the real π0.5 tokenizer/preprocessor and postprocessors with mock inference, retaining the eight-value state and seven-value action contracts. The reusable Pi05PolicyAdapter.from_lerobot_policy constructor was exercised with a mock inference object and the real LeRobot processor pipelines; the actual checkpoint-backed policy remains uninitialized because its 7.47 GB weights are not present.
 
 
 For the automated real-simulator integration test (requires the cached assets and
@@ -158,3 +151,11 @@ A CUDA Linux machine can run simulator, model and evaluator together, avoiding
 an unimplemented remote-inference transport. LeRobot offers a remote policy
 server for deployments where the GPU is on another computer, but that is a
 separate path and is not needed for this simulation evaluation.
+
+
+After authenticating the tokenizer, run the actual π0.5 processor integration
+without model weights with:
+
+    RUN_PI05_PROCESSOR_INTEGRATION=1 PYTHONPATH=. pytest -q tests/test_pi05_processor_integration.py
+
+The default suite reports 10 passed and skips both opt-in integrations. The real OSMesa LIBERO integration and authenticated π0.5 processor integration each pass when run explicitly in this configured Ubuntu environment.

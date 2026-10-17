@@ -28,15 +28,13 @@ class Pi05PolicyAdapter:
         self._chunk_id = self._chunk_index = 0
 
     @classmethod
-    def from_pretrained(cls, checkpoint, *, task, execute_steps=10, local_files_only=True, env_config=None, device=None, dtype=None):
+    def from_pretrained(cls, checkpoint, *, task, execute_steps=10, local_files_only=True,
+                        env_config=None, device=None, dtype=None):
         """Load a local checkpoint on demand; never download weights by default."""
         if local_files_only and not Path(checkpoint).exists():
             raise FileNotFoundError(f"local checkpoint does not exist: {checkpoint}")
-        from lerobot.envs.factory import make_env_pre_post_processors
-        from lerobot.envs.utils import preprocess_observation
-        from lerobot.policies.factory import make_pre_post_processors
         from lerobot.policies.pi05.modeling_pi05 import PI05Policy
-        from lerobot.utils.constants import ACTION
+
         policy = PI05Policy.from_pretrained(checkpoint, local_files_only=local_files_only)
         if device is not None or dtype is not None:
             policy.to(device=device, dtype=dtype)
@@ -44,17 +42,39 @@ class Pi05PolicyAdapter:
             policy.config.device = device
         if dtype is not None:
             policy.config.dtype = dtype
-        preprocessor, policy_postprocessor = make_pre_post_processors(
-            policy_cfg=policy.config, pretrained_path=checkpoint)
+        return cls.from_lerobot_policy(
+            policy, task=task, execute_steps=execute_steps, env_config=env_config,
+            pretrained_path=checkpoint,
+        )
+
+    @classmethod
+    def from_lerobot_policy(cls, policy, *, task, execute_steps=10, env_config=None,
+                            pretrained_path=None):
+        """Wire an existing LeRobot π0.5 policy to the LIBERO evaluator.
+
+        This constructor permits processor/contract tests with a mock inference
+        object that carries a real PI05Config, without loading checkpoint weights.
+        """
+        from lerobot.envs.factory import make_env_pre_post_processors
+        from lerobot.envs.utils import preprocess_observation
+        from lerobot.policies.factory import make_pre_post_processors
+        from lerobot.utils.constants import ACTION
         from thesis_vla.libero import LiberoTaskConfig, make_lerobot_env_config
+
+        preprocessor, policy_postprocessor = make_pre_post_processors(
+            policy_cfg=policy.config, pretrained_path=pretrained_path)
         env_preprocessor, env_postprocessor = make_env_pre_post_processors(
-            env_cfg=make_lerobot_env_config(env_config or LiberoTaskConfig()), policy_cfg=policy.config)
+            env_cfg=make_lerobot_env_config(env_config or LiberoTaskConfig()),
+            policy_cfg=policy.config)
+
         def prepare(raw_observation, instruction):
             batch = preprocess_observation({k: _add_batch(v) for k, v in raw_observation.items()})
             batch["task"] = [instruction]
             return preprocessor(env_preprocessor(batch))
+
         def process_action(chunk):
             return _process_chunk(chunk, policy_postprocessor, env_postprocessor, ACTION)
+
         return cls(policy, prepare, process_action, task=task, execute_steps=execute_steps)
 
     def act(self, observation):
