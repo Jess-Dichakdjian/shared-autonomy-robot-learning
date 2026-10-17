@@ -95,7 +95,7 @@ Run a short mock-policy integration rollout (no checkpoint is loaded):
 Test this repository with `PYTHONPATH=. pytest -q`. The project has no
 packaging metadata yet, so setting the root import path is required.
 
-Verified on 2026-10-17: 9 unit tests pass. A real OSMesa LIBERO spatial
+Verified on 2026-10-17: 10 unit tests pass. A real OSMesa LIBERO spatial
 task-0 rollout completed three mock actions and saved metrics, JSONL trajectories,
 and a playable MP4. Its reported success rate was 0.0 under the intentionally
 uninformed mock policy; this is a pipeline check, not a learned-policy score.
@@ -130,3 +130,31 @@ OSMesa), run:
 
 The normal test command skips this simulator-dependent case, so unit tests remain
 usable on machines without the LIBERO rendering stack.
+
+
+## Real pretrained evaluation runner
+
+The CUDA-host entry point is `scripts/evaluate_libero_pi05.py`. It calls the same
+`run_evaluation` loop and logger as the mock path, requires a local checkpoint
+directory, sets the policy and processor device, and never downloads checkpoint
+weights:
+
+    source ~/.venvs/shared-autonomy-robot-learning-pi05/bin/activate
+    cd ~/projects/shared-autonomy-robot-learning
+    hf auth login
+    MUJOCO_GL=osmesa PYTHONPATH=. python scripts/evaluate_libero_pi05.py \
+      --checkpoint /local/path/pi05_libero_finetuned_v044 \
+      --suite libero_spatial --task-id 0 --episodes 10 --seed 0 \
+      --execute-steps 10 --device cuda --dtype auto \
+      --output outputs/pi05_libero_spatial
+
+The Hugging Face `lerobot/pi05_libero_finetuned_v044` checkpoint is 7.47 GB
+on disk. No weights were downloaded during this work. The user reports a prior
+successful π0.5 run on the HP OMEN RTX 2060 with 6 GB VRAM; that is useful
+historical evidence for the GPU route, but this WSL machine has not reproduced
+it. The runner provides explicit dtype selection if the host/checkpoint needs
+it; validate the chosen dtype and memory use on that GPU before a full benchmark.
+A CUDA Linux machine can run simulator, model and evaluator together, avoiding
+an unimplemented remote-inference transport. LeRobot offers a remote policy
+server for deployments where the GPU is on another computer, but that is a
+separate path and is not needed for this simulation evaluation.

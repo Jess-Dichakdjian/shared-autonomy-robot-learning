@@ -24,3 +24,11 @@ def test_proposal_preserves_raw_prediction_and_postprocessed_execution():
     assert first.executed_action[0] == 0
     assert second.predicted_action[0] == 0.75
     assert second.executed_action[0] == 1.0
+
+def test_pretrained_loader_refuses_missing_local_checkpoint_without_downloading():
+    import pytest
+
+    with pytest.raises(FileNotFoundError, match="local checkpoint does not exist"):
+        Pi05PolicyAdapter.from_pretrained(
+            "/tmp/no-such-pi05-checkpoint", task="fixture", local_files_only=True
+        )

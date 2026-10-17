@@ -28,7 +28,7 @@ class Pi05PolicyAdapter:
         self._chunk_id = self._chunk_index = 0
 
     @classmethod
-    def from_pretrained(cls, checkpoint, *, task, execute_steps=10, local_files_only=True, env_config=None):
+    def from_pretrained(cls, checkpoint, *, task, execute_steps=10, local_files_only=True, env_config=None, device=None, dtype=None):
         """Load a local checkpoint on demand; never download weights by default."""
         if local_files_only and not Path(checkpoint).exists():
             raise FileNotFoundError(f"local checkpoint does not exist: {checkpoint}")
@@ -38,6 +38,12 @@ class Pi05PolicyAdapter:
         from lerobot.policies.pi05.modeling_pi05 import PI05Policy
         from lerobot.utils.constants import ACTION
         policy = PI05Policy.from_pretrained(checkpoint, local_files_only=local_files_only)
+        if device is not None or dtype is not None:
+            policy.to(device=device, dtype=dtype)
+        if device is not None:
+            policy.config.device = device
+        if dtype is not None:
+            policy.config.dtype = dtype
         preprocessor, policy_postprocessor = make_pre_post_processors(
             policy_cfg=policy.config, pretrained_path=checkpoint)
         from thesis_vla.libero import LiberoTaskConfig, make_lerobot_env_config
