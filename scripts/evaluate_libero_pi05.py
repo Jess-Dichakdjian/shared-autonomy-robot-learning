@@ -1,13 +1,16 @@
 """Run the shared LIBERO evaluator with a local pretrained LeRobot pi0.5 checkpoint.
 
-This script never downloads checkpoint weights. Prepare them on the CUDA Linux
+This script never downloads checkpoint weights. Prepare them on the target Linux
 host, authenticate to Hugging Face there for the gated tokenizer, then pass the
-local pretrained_model directory via --checkpoint.
+local pretrained_model directory via --checkpoint. CPU and CUDA devices are supported.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import platform
+import resource
+import time
 from pathlib import Path
 import sys
 
@@ -24,7 +27,7 @@ def main():
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--execute-steps", type=int, default=10)
-    parser.add_argument("--device", default="cuda")
+    parser.add_argument("--device", default="cuda", help="inference device; cpu is accepted when RAM headroom permits")
     parser.add_argument("--dtype", choices=("auto", "float16", "bfloat16", "float32"), default="auto")
     parser.add_argument("--output", type=Path, default=Path("outputs/pi05_libero"))
     parser.add_argument("--gl", choices=("osmesa", "egl", "glfw"), default="osmesa")
@@ -50,11 +53,15 @@ def main():
     env = LiberoVectorAdapter(create_vector_env(config, gl=args.gl))
     policy = None
     try:
+        load_started = time.perf_counter()
         policy = Pi05PolicyAdapter.from_pretrained(
             args.checkpoint, task=task, env_config=config,
             execute_steps=args.execute_steps, local_files_only=True, device=args.device,
             dtype=None if args.dtype == "auto" else getattr(torch, args.dtype),
         )
+        policy_load_seconds = time.perf_counter() - load_started
+        load_peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        load_peak_bytes = int(load_peak if sys.platform == "darwin" else load_peak * 1024)
         model_config = policy.policy.config
         run_config = {
             "suite": args.suite, "task_id": args.task_id, "task_instruction": task,
@@ -64,7 +71,10 @@ def main():
             "checkpoint": str(args.checkpoint.resolve()), "device": args.device,
             "dtype": str(getattr(model_config, "dtype", "checkpoint_default")),
             "execute_steps": args.execute_steps, "seed_rule": "base_seed + episode_index",
-            "torch_version": torch.__version__,
+            "torch_version": torch.__version__, "policy_load_seconds": policy_load_seconds,
+            "process_peak_rss_bytes_after_load": load_peak_bytes,
+            "cpu_name": platform.processor() if args.device == "cpu" else None,
+            "cpu_threads": torch.get_num_threads() if args.device == "cpu" else None,
             "gpu_name": torch.cuda.get_device_name(0) if args.device.startswith("cuda") else None,
         }
         result = run_evaluation(

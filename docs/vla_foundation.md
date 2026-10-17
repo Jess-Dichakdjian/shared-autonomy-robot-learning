@@ -228,6 +228,43 @@ increasing episode count. A later multi-episode benchmark must specify its
 episode count explicitly and use distinct/reproducibly recorded seeds.
 
 The target CUDA Linux machine and its user/session access have not yet been
-provided to this Codex session. The Lenovo WSL preflight correctly stops because its installed PyTorch is CPU-only.
-No CUDA host preflight, checkpoint download, or real pretrained rollout is
+provided to this Codex session. The checkpoint is now cached at ~/models/pi05_libero_finetuned_v044 on the
+Lenovo. Its safetensors header reports 690 BF16 and 122 F32 tensors (7,473,096,344
+bytes); weights remain unloaded. The CPU preflight stops before renderer/model
+loading because WSL has 6.81 GiB available against its conservative 10.44 GiB
+headroom heuristic. No actual checkpoint load or real-policy inference is
 claimed complete.
+
+
+### Lenovo CPU feasibility findings (2026-10-17)
+
+Windows reports 15.32 GiB physical RAM, 1.68 GiB available (89% memory load),
+and 4.32 GiB pagefile available. WSL reports 7.42 GiB total, 6.81 GiB
+available at the CPU preflight, and 2 GiB swap with no swap used. WSL's root
+filesystem has 948 GiB free; Windows C: has 828 GiB free. The CPU is an AMD
+Ryzen AI 7 445 (6 cores / 12 logical CPUs) and exposes AVX2, AVX-512 BF16 and
+AVX-VNNI. PyTorch is 2.11.0+cpu with six intra-op threads. Small BF16 matmul,
+layer-norm and scaled-dot-product-attention operations succeeded; this verifies
+those primitives only, not the complete Pi05 graph.
+
+The weights occupy about 6.96 GiB in memory before Python, processor and
+inference workspace. WSL's entire 7.42 GiB limit leaves too little safety
+margin, and Windows host memory is already under pressure. The CPU preflight
+uses 1.5x the checkpoint file size (10.44 GiB available) as a conservative
+load-headroom heuristic, not an upstream Pi05 requirement. It correctly
+refuses the Lenovo before model load or renderer startup. No WSL memory setting
+was changed. The preflight can be checked with:
+
+```bash
+python scripts/preflight_pi05_cuda.py --device cpu --checkpoint-dir "$HOME/models/pi05_libero_finetuned_v044"
+```
+
+The real runner already accepts `--device cpu`; its automatic dtype retains the
+checkpoint's BF16 configuration. It now sets evaluation mode and the shared
+evaluator wraps policy actions in `torch.inference_mode()`. Step logs record
+inference latency; metrics record process peak RSS and the runner records load
+time and post-load peak RSS. The authenticated processor integration passed
+on CPU with mock inference. Those checks do not establish actual model load or
+inference viability on this Lenovo. Do not increase WSL memory or use swap to
+force the load: Windows has only 15.32 GiB total RAM and is currently highly
+loaded.

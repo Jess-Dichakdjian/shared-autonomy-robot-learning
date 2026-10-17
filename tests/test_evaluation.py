@@ -13,6 +13,8 @@ class FakePolicy:
     def reset(self):
         self.resets += 1
     def act(self, observation):
+        import torch
+        assert torch.is_inference_mode_enabled()
         self.calls += 1
         raw = np.array([2.0, 0.1, 0, 0, 0, 0, -1], dtype=np.float32)
         executed = np.array([1.0, 0.1, 0, 0, 0, 0, -1], dtype=np.float32)
@@ -62,6 +64,8 @@ def test_evaluator_logs_seed_actions_state_outcome_metrics_and_video(tmp_path):
     assert step_rows[0]["executed_action"][0] == 1.0
     assert step_rows[0]["robot_state"]["eef"]["pos"] == [0.0, 0.0, 0.0]
     assert step_rows[0]["chunk_start"] is True
+    assert step_rows[0]["inference_seconds"] >= 0
+    assert metrics["process_peak_rss_bytes"] > 0
     assert episode_rows[1]["seed"] == 42 and episode_rows[1]["success"] is True
     assert episode_rows[0]["video"] == "episode_000.mp4"
 

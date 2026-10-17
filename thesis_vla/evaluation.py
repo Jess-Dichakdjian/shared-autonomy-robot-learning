@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
 import json
+import time
 from pathlib import Path
 from typing import Any
 import numpy as np
@@ -59,7 +60,11 @@ def run_evaluation(env, policy, output_dir: str | Path, *, episodes: int, base_s
             step_count = 0
             video_path = output / f"episode_{episode_index:03d}.mp4"
             while not (terminated or truncated) and (max_steps is None or step_count < max_steps):
-                proposal = policy.act(observation)
+                import torch
+                inference_started = time.perf_counter()
+                with torch.inference_mode():
+                    proposal = policy.act(observation)
+                inference_seconds = time.perf_counter() - inference_started
                 next_observation, reward, terminated, truncated, info = env.step(proposal.executed_action)
                 total_reward += reward
                 step_count += 1
@@ -72,7 +77,7 @@ def run_evaluation(env, policy, output_dir: str | Path, *, episodes: int, base_s
                     "episode": episode_index, "step": step_count - 1, "seed": seed, "task": task,
                     "predicted_action": proposal.predicted_action, "executed_action": proposal.executed_action,
                     "chunk_id": proposal.chunk_id, "chunk_index": proposal.chunk_index,
-                    "chunk_start": proposal.is_chunk_start,
+                    "chunk_start": proposal.is_chunk_start, "inference_seconds": inference_seconds,
                     "robot_state": _robot_state(observation), "next_robot_state": _robot_state(next_observation),
                     "reward": reward, "terminated": terminated, "truncated": truncated,
                     "success": found_success, "configuration": config_record,
@@ -99,6 +104,7 @@ def run_evaluation(env, policy, output_dir: str | Path, *, episodes: int, base_s
         "mean_return": float(np.mean(returns)), "std_return": float(np.std(returns)),
         "mean_steps": float(np.mean([item["steps"] for item in all_episodes])),
         "episode_results": all_episodes, "configuration": config_record,
+        "process_peak_rss_bytes": _peak_rss_bytes(),
     }
     (output / "metrics.json").write_text(json.dumps(_jsonable(metrics), indent=2) + "\n", encoding="utf-8")
     return metrics
@@ -184,3 +190,13 @@ def _jsonable(value):
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     return repr(value)
+
+
+def _peak_rss_bytes():
+    try:
+        import resource
+        peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    except (ImportError, AttributeError):
+        return None
+    # Linux reports KiB; macOS reports bytes.
+    return int(peak if __import__("sys").platform == "darwin" else peak * 1024)

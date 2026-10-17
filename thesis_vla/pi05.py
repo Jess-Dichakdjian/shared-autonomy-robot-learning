@@ -36,6 +36,7 @@ class Pi05PolicyAdapter:
         from lerobot.policies.pi05.modeling_pi05 import PI05Policy
 
         policy = PI05Policy.from_pretrained(checkpoint, local_files_only=local_files_only)
+        policy.eval()
         if device is not None or dtype is not None:
             policy.to(device=device, dtype=dtype)
         if device is not None:
