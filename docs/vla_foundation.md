@@ -127,7 +127,8 @@ usable on machines without the LIBERO rendering stack.
 
 ## Real pretrained evaluation runner
 
-The CUDA-host entry point is `scripts/evaluate_libero_pi05.py`. It calls the same
+The CUDA-host entry point is `scripts/evaluate_libero_pi05.py`. Its default is
+one episode so the first real run is constrained by default. It calls the same
 `run_evaluation` loop and logger as the mock path, requires a local checkpoint
 directory, sets the policy and processor device, and never downloads checkpoint
 weights:
@@ -137,12 +138,19 @@ weights:
     hf auth login
     MUJOCO_GL=osmesa PYTHONPATH=. python scripts/evaluate_libero_pi05.py \
       --checkpoint /local/path/pi05_libero_finetuned_v044 \
-      --suite libero_spatial --task-id 0 --episodes 10 --seed 0 \
+      --suite libero_spatial --task-id 0 --episodes 1 --seed 0 \
       --execute-steps 10 --device cuda --dtype auto \
       --output outputs/pi05_libero_spatial
 
-The Hugging Face `lerobot/pi05_libero_finetuned_v044` checkpoint is 7.47 GB
-on disk. No weights were downloaded during this work. The user reports a prior
+Checkpoint identity and revision: the user's historical run used
+`lerobot/pi05_libero_finetuned`. Hugging Face currently redirects that ID to
+`lerobot/pi05_libero_finetuned_v044`, so it is an alias, not evidence of a
+separate current checkpoint. The v044 main revision checked on 2026-10-17 is
+`7152f13e34c6c115d808aea0e5d08aca74eac14b`; its `model.safetensors` is
+7.47 GB, with processor/config files alongside it. For reproducibility the
+procedure below pins this full revision. The report should still record both
+the historical alias and the resolved canonical ID/revision. No weights were
+downloaded during this work. The user reports a prior
 successful π0.5 run on the HP OMEN RTX 2060 with 6 GB VRAM; that is useful
 historical evidence for the GPU route, but this WSL machine has not reproduced
 it. The runner provides explicit dtype selection if the host/checkpoint needs
@@ -159,3 +167,67 @@ without model weights with:
     RUN_PI05_PROCESSOR_INTEGRATION=1 PYTHONPATH=. pytest -q tests/test_pi05_processor_integration.py
 
 The default suite reports 10 passed and skips both opt-in integrations. The real OSMesa LIBERO integration and authenticated π0.5 processor integration each pass when run explicitly in this configured Ubuntu environment.
+
+
+## CUDA Linux host: reproducible first real run
+
+This project pins the LeRobot source commit
+`146d8474932c8b566717eb2738ba459337ab71c4`; the configured and tested
+environment reports LeRobot 0.6.2. Keep that exact source pin for this
+evaluation. The Lenovo's existing environment is CPU-only and must not receive
+the checkpoint. Install this environment on the target CUDA Linux host, using
+the CUDA-enabled PyTorch build appropriate for that host and the repository's
+requirements file. Do not replace it with a CPU-only Torch wheel.
+
+Before downloading weights, run the weight-free preflight. It verifies that
+PyTorch can initialize CUDA, reports GPU/free VRAM, checks conservative disk
+headroom against the pinned checkpoint size, and launches the existing LIBERO
+Spatial task-0 renderer smoke test with OSMesa. It does not fetch model files.
+The 80 GB figure in LeRobot docs is a training recipe, not an inference
+minimum. Public documentation does not specify a guaranteed inference VRAM
+minimum; the user's historical RTX 2060 6 GB result is evidence from another
+machine, not a guarantee for this exact revision. Record the preflight's GPU
+and free-memory output before proceeding.
+
+`lerobot/pi05_libero_finetuned` resolves to
+`lerobot/pi05_libero_finetuned_v044` on the Hub. The v044 revision pinned
+above contains a 7.47 GB model file. The command reserves at least twice that
+size at the target model directory's filesystem as download/cache headroom.
+The separate gated Google tokenizer requires the account to have accepted
+`google/paligemma-3b-pt-224` access and be authenticated on the CUDA host.
+
+On the CUDA Linux host, use Python 3.12 and the same pinned repository
+checkout. Install the LIBERO OSMesa system libraries if they are not already
+present, then create an isolated environment. Install a CUDA-enabled PyTorch
+build selected for the host's NVIDIA driver using PyTorch's official
+installation selector before installing the repository requirements; verify
+torch.cuda.is_available() before proceeding. The repository requirements
+pin LeRobot's source commit, its LIBERO/pi extras, pytest and CMake.
+
+```bash
+sudo apt-get update
+sudo apt-get install -y build-essential libosmesa6
+python3.12 -m venv ~/.venvs/shared-autonomy-robot-learning-pi05
+source ~/.venvs/shared-autonomy-robot-learning-pi05/bin/activate
+python -m pip install --upgrade pip
+# First install CUDA-enabled PyTorch selected for this host's driver.
+python -c 'import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())'
+python -m pip install -r requirements-pi05-cuda-linux.txt
+python -c 'import torch, lerobot; print(torch.__version__, lerobot.__version__, torch.cuda.is_available())'
+python scripts/preflight_pi05_cuda.py --checkpoint-dir "$HOME/models/pi05_libero_finetuned_v044" --gl osmesa
+hf auth whoami
+hf download lerobot/pi05_libero_finetuned_v044 --revision 7152f13e34c6c115d808aea0e5d08aca74eac14b --local-dir "$HOME/models/pi05_libero_finetuned_v044"
+MUJOCO_GL=osmesa PYTHONPATH=. python scripts/evaluate_libero_pi05.py --checkpoint "$HOME/models/pi05_libero_finetuned_v044" --suite libero_spatial --task-id 0 --episodes 1 --seed 0 --execute-steps 10 --device cuda --dtype auto --output outputs/pi05_libero_spatial_task0_first
+```
+
+The runner loads a local directory only, then calls the established pi0.5
+adapter, shared evaluation loop and episode logger. A successful run should
+produce metrics, predicted/executed actions, state/config/seed records, and a
+side-by-side camera video. Inspect those artifacts and peak GPU memory before
+increasing episode count. A later multi-episode benchmark must specify its
+episode count explicitly and use distinct/reproducibly recorded seeds.
+
+The target CUDA Linux machine and its user/session access have not yet been
+provided to this Codex session. The Lenovo WSL preflight correctly stops because its installed PyTorch is CPU-only.
+No CUDA host preflight, checkpoint download, or real pretrained rollout is
+claimed complete.

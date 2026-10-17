@@ -20,7 +20,7 @@ def main():
                         help="local LeRobot pi0.5 pretrained_model directory; weights are never downloaded")
     parser.add_argument("--suite", default="libero_spatial")
     parser.add_argument("--task-id", type=int, default=0)
-    parser.add_argument("--episodes", type=int, default=10)
+    parser.add_argument("--episodes", type=int, default=1)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--execute-steps", type=int, default=10)
