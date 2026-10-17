@@ -216,3 +216,22 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local evaluation outputs, datasets, and pretrained model weights
+outputs/
+checkpoints/
+models/
+datasets/
+*.safetensors
+*.ckpt
+*.pth
+*.pt
+
+# Local credentials and tokens
+.env
+.env.*
+!.env.example
+.secrets/
+.hf/
+hf_token*
+huggingface_token*
