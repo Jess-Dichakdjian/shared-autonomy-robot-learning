@@ -4,6 +4,33 @@
 
 > **Status:** Active research project — implementation in progress.
 
+## Verified implementation update - 23 October 2026
+
+The canonical thesis repository now contains a tested LIBERO/LeRobot pi0.5
+evaluation foundation. The current evidence is a **mock-policy pipeline test**;
+it is not a real pretrained pi0.5 result.
+
+- LIBERO Spatial task 0 runs under OSMesa with two 256x256 RGB cameras, an
+  eight-value processed robot state and a seven-value relative OSC action.
+- The evaluator resets policy state, handles action chunks, and records
+  predicted/executed actions, robot state, seeds, outcomes, metrics and video.
+- LeRobot 0.6.2's actual pi0.5 tokenizer and preprocessing/postprocessing were
+  exercised with mock inference; pretrained policy weights were not run.
+- A three-step mock rollout (seed 123) was recorded. It exercised the pipeline,
+  but did not complete the task (success 0.0, return 0.0). A copy of its video,
+  logs, metrics and configuration is in
+  experiments/libero_mock_policy_smoke_2026-10-17/.
+- The pinned 7.47 GB checkpoint is cached on the Lenovo outside Git. Its
+  weights were not loaded because available WSL RAM is insufficient.
+- The user reports an earlier successful real pi0.5 run on an HP OMEN RTX 2060.
+  That historical run is distinct from this new pipeline, and its original
+  video/results have not been recovered or independently verified.
+
+**Still planned:** real pretrained evaluation on a CUDA host, followed by
+uncertainty estimation, intervention and XR corrective-demonstration work.
+Those later components are not implemented.
+
+
 This repository documents my MSc thesis research on **uncertainty-aware shared autonomy for robotic manipulation**, combining **Vision-Language-Action models, diffusion policies, uncertainty estimation, and human corrective demonstrations**.
 
 The research is being conducted at **University College London (UCL)** as part of my MSc in **Robotics and Mechatronics Engineering at Politecnico di Milano**.
@@ -14,11 +41,11 @@ At the current stage of the project:
 
 - literature review and research pipeline definition are complete
 - initial diffusion-policy setup and small-scale testing have been performed
-- VLA model integration and evaluation are currently in progress
-- the project builds on an existing UCL MuJoCo manipulation benchmark using a Franka robot
+- The LIBERO/LeRobot pi0.5 evaluation foundation is mock-validated; pretrained inference is pending
+- an earlier scripted-hover baseline used a UCL MuJoCo Franka benchmark; the current VLA evaluation foundation is separate and uses LIBERO
 - XR-based human corrective demonstrations and uncertainty-aware shared autonomy are planned for later stages
 
-No final experimental results are available yet.
+No final learned-policy or shared-autonomy results are available yet. The earlier scripted-hover pilot and current mock-policy pipeline check are documented separately.
 
 ## Research Problem
 
@@ -36,7 +63,7 @@ The objective is to develop and evaluate a shared-autonomy pipeline in which:
 4. the operator provides corrective demonstrations through an XR interface,
 5. the collected corrections can be used to improve subsequent robot behaviour.
 
-The project is focused on **robotic manipulation with a Franka manipulator in MuJoCo**, with the broader goal of studying how human corrections can be incorporated efficiently into robot-learning systems.
+The research focuses on robotic manipulation and efficient human correction. The current VLA evaluation foundation uses LIBERO's Franka Panda simulation; the earlier scripted hover pilot used a separate MuJoCo benchmark.
 
 
 ## Planned System Pipeline
@@ -104,8 +131,9 @@ Unity XR interface for corrective demonstrations
 |---|---|---|
 | Literature review & system design | ✅ Completed | Research direction, system architecture and planned experimental pipeline defined |
 | Diffusion Policy | 🟡 Initial testing | Existing implementation downloaded, configured and used for small-scale testing |
-| VLA model | 🟡 In progress | Currently working on VLA integration and evaluation |
-| MuJoCo manipulation environment | 🟡 Existing baseline / integration in progress | Thesis builds on an existing UCL Franka MuJoCo benchmark |
+| VLA model | Foundation tested; pretrained inference pending | LeRobot pi0.5 tokenizer/processors and the LIBERO adapter were exercised with mock inference; weights have not been loaded on Lenovo |
+| LIBERO simulation | Integration tested | LIBERO Spatial task 0 resets, renders both cameras and accepts seven-value relative OSC actions under OSMesa |
+| Earlier MuJoCo hover baseline | Historical pilot | Separate scripted hover experiment; not a VLA or shared-autonomy result |
 | Manipulation task | 🟡 In development | Square manipulation is the main target task; simpler tasks may be used for debugging |
 | Gaussian Process uncertainty estimation | ⚪ Planned | Intended to provide uncertainty / variance estimates during policy execution |
 | Uncertainty-triggered intervention | ⚪ Planned | Decision logic for requesting human correction has not yet been implemented |
@@ -114,7 +142,8 @@ Unity XR interface for corrective demonstrations
 | Online uncertainty-model update | ⚪ Planned | Intended to incorporate information from human corrective demonstrations |
 | Offline policy improvement | ⚪ Planned | Corrective demonstrations are intended for later policy fine-tuning / improvement |
 | Integrated shared-autonomy pipeline | ⚪ Planned | Full end-to-end system has not yet been implemented |
-| Experimental evaluation | ⚪ Not started | No final quantitative results are available yet |
+| Evaluation pipeline | Mock validation only | One three-step mock-policy rollout and automated integration checks; no learned-policy benchmark result yet |
+| Real pretrained pi0.5 evaluation | Pending host capacity | Checkpoint cached locally; Lenovo CPU load was blocked by RAM headroom; run on a CUDA host next |
 
 **Status key:**  
 ✅ Completed · 🟡 In progress / partially implemented · ⚪ Planned
@@ -123,23 +152,23 @@ Unity XR interface for corrective demonstrations
 
 ## Project Scope and Contribution
 
-This thesis builds on an existing private UCL research repository, **`VLA_Benchmark`**, which provides baseline infrastructure for robot-learning experiments.
+This thesis is maintained in the canonical shared-autonomy-robot-learning repository. It does not build on the separate VLA_Benchmark repository, **`VLA_Benchmark`**, which provides baseline infrastructure for robot-learning experiments.
 
-### Existing UCL Baseline
+### Reference projects and evaluation setup
 
-The upstream UCL repository already contains components including:
+The original ~/projects/ego2robot checkout is preserved unchanged and serves
+only as a reference for reusable simulation, demonstration, evaluation and
+geometric-control ideas. This repository is the canonical thesis codebase.
 
-- a MuJoCo simulation environment
-- a Franka manipulator model and simulation assets
-- data-collection utilities
-- existing VLA experimentation code
-- infrastructure for connecting learned policies to the simulation
-
-These components were **not originally developed by me**.
+The current VLA baseline is a separate LIBERO + LeRobot pi0.5 integration.
+VLA_Benchmark is not the implementation base for this thesis pipeline.
+Earlier MuJoCo hover-pilot code and infrastructure are kept as prior work and
+are not presented as part of the new LIBERO policy evaluation. Third-party and
+reference components are attributed rather than claimed as original work.
 
 ### My Thesis Work
 
-My work focuses on extending this baseline toward an **uncertainty-aware shared-autonomy system**.
+My work focuses on extending the LIBERO/LeRobot evaluation foundation toward an **uncertainty-aware shared-autonomy system**.
 
 My current and planned contributions include:
 
@@ -291,7 +320,7 @@ shared-autonomy-robot-learning/
 
 This thesis is being conducted at **University College London (UCL)** as visiting research for the MSc in **Robotics and Mechatronics Engineering at Politecnico di Milano**.
 
-The project builds on the private UCL `VLA_Benchmark` research repository, which provides existing MuJoCo, Franka, data-collection and VLA experimentation infrastructure.
+The current VLA evaluation uses LIBERO and LeRobot in this repository. VLA_Benchmark is a separate reference project and is not the implementation base.
 
 Existing UCL and third-party components are not claimed as my original work. My contributions and modifications will be identified explicitly as the project develops.
 
@@ -299,4 +328,4 @@ Existing UCL and third-party components are not claimed as my original work. My 
 
 🚧 **Active MSc thesis research — 2026/2027**
 
-Implementation, experiments and results will be added progressively as the thesis develops.tion, experiments and results will be added progressively as the thesis develops.
+Implementation, experiments and results will be added progressively as the thesis develops.

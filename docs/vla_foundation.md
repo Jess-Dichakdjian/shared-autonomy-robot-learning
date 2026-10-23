@@ -25,8 +25,8 @@ relative OSC action in [-1, 1].
   a chunk, executes at most ten steps by default, and records chunk id/index.
   clear_action_queue discards stale actions and calls policy.reset() to flush
   policy temporal inference memory.
-- No policy checkpoint, demonstration dataset, or learned inference result is
-  included in this foundation.
+- Checkpoint weights are stored outside the Git checkout. They have not been
+  loaded on the Lenovo; no learned inference result is claimed.
 
 ## Observation/action contract
 
@@ -52,7 +52,8 @@ toolchain; with current CMake, set CMAKE_POLICY_VERSION_MINIMUM=3.5 for the
 install command. OSMesa is provided by Ubuntu's libosmesa6 runtime package.
 
 The official LIBERO geometry/texture assets are cached at
-~/.cache/libero/assets. No demonstrations or model weights were downloaded.
+~/.cache/libero/assets. No demonstrations are used. The pinned pi0.5 checkpoint
+is cached at ~/models/pi05_libero_finetuned_v044 outside the Git checkout.
 To rerun the checkpoint-free smoke test from the canonical repository:
 
     MUJOCO_GL=osmesa python scripts/libero_smoke.py --gl osmesa --suite libero_spatial --task-id 0
@@ -113,7 +114,7 @@ same machine if possible, and record its GPU, dtype, latency and versions.
 Remote inference is technically possible, but adds a policy-server/network
 boundary that this LIBERO evaluator has not implemented or validated.
 
-Hugging Face authentication was verified in WSL and only google/paligemma-3b-pt-224/config.json was explicitly downloaded. Building LeRobot's π0.5 processors then initialized the real GemmaTokenizer and policy/environment pipelines. The tokenizer cache contains vocabulary/config assets (including a 17.5 MB tokenizer.json); no policy weight file was downloaded. An opt-in test passes synthetic LIBERO-compatible observations through the real π0.5 tokenizer/preprocessor and postprocessors with mock inference, retaining the eight-value state and seven-value action contracts. The reusable Pi05PolicyAdapter.from_lerobot_policy constructor was exercised with a mock inference object and the real LeRobot processor pipelines; the actual checkpoint-backed policy remains uninitialized because its 7.47 GB weights are not present.
+Hugging Face authentication was verified in WSL and only google/paligemma-3b-pt-224/config.json was explicitly downloaded. Building LeRobot's π0.5 processors then initialized the real GemmaTokenizer and policy/environment pipelines. The tokenizer cache contains vocabulary/config assets (including a 17.5 MB tokenizer.json); no policy weights were downloaded during processor initialization; the pinned checkpoint was later downloaded separately and remains unloaded. An opt-in test passes synthetic LIBERO-compatible observations through the real π0.5 tokenizer/preprocessor and postprocessors with mock inference, retaining the eight-value state and seven-value action contracts. The reusable Pi05PolicyAdapter.from_lerobot_policy constructor was exercised with a mock inference object and the real LeRobot processor pipelines; the actual checkpoint-backed policy remains uninitialized; the 7.47 GB weights are cached locally but have not been loaded.
 
 
 For the automated real-simulator integration test (requires the cached assets and
@@ -149,8 +150,7 @@ separate current checkpoint. The v044 main revision checked on 2026-10-17 is
 `7152f13e34c6c115d808aea0e5d08aca74eac14b`; its `model.safetensors` is
 7.47 GB, with processor/config files alongside it. For reproducibility the
 procedure below pins this full revision. The report should still record both
-the historical alias and the resolved canonical ID/revision. No weights were
-downloaded during this work. The user reports a prior
+the historical alias and the resolved canonical ID/revision. The checkpoint was downloaded on 2026-10-17 to ~/models/pi05_libero_finetuned_v044 outside Git; its 7.47 GB weights remain unloaded. The user reports a prior
 successful π0.5 run on the HP OMEN RTX 2060 with 6 GB VRAM; that is useful
 historical evidence for the GPU route, but this WSL machine has not reproduced
 it. The runner provides explicit dtype selection if the host/checkpoint needs

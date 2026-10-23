@@ -1,0 +1,63 @@
+{
+  "task": "pick up the black bowl between the plate and the ramekin and place it on the plate",
+  "episodes": 1,
+  "base_seed": 123,
+  "successes_observed": 1,
+  "success_rate": 0.0,
+  "mean_return": 0.0,
+  "std_return": 0.0,
+  "mean_steps": 3.0,
+  "episode_results": [
+    {
+      "episode": 0,
+      "seed": 123,
+      "task": "pick up the black bowl between the plate and the ramekin and place it on the plate",
+      "success": false,
+      "return": 0.0,
+      "steps": 3,
+      "terminated": false,
+      "truncated": false,
+      "video": "episode_000.mp4",
+      "reset_info": {
+        "is_success": false,
+        "_is_success": true
+      },
+      "configuration": {
+        "suite": "libero_spatial",
+        "task_id": 0,
+        "task_instruction": "pick up the black bowl between the plate and the ramekin and place it on the plate",
+        "width": 256,
+        "height": 256,
+        "fps": 20,
+        "control_mode": "relative",
+        "camera_names": [
+          "agentview_image",
+          "robot0_eye_in_hand_image"
+        ],
+        "renderer": "osmesa",
+        "policy": "mock_zero_chunk",
+        "chunk_length": 50,
+        "execute_steps": 2,
+        "seed_rule": "base_seed + episode_index"
+      }
+    }
+  ],
+  "configuration": {
+    "suite": "libero_spatial",
+    "task_id": 0,
+    "task_instruction": "pick up the black bowl between the plate and the ramekin and place it on the plate",
+    "width": 256,
+    "height": 256,
+    "fps": 20,
+    "control_mode": "relative",
+    "camera_names": [
+      "agentview_image",
+      "robot0_eye_in_hand_image"
+    ],
+    "renderer": "osmesa",
+    "policy": "mock_zero_chunk",
+    "chunk_length": 50,
+    "execute_steps": 2,
+    "seed_rule": "base_seed + episode_index"
+  }
+}

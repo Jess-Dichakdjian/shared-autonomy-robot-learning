@@ -1,6 +1,7 @@
-# VLA integration: current blockers
+# Historical VLA_Benchmark integration audit (superseded)
 
-**Checked:** 6 October 2026  
+**Checked:** 6 October 2026
+**Status:** Historical snapshot. The implementation direction later changed to the canonical LIBERO + LeRobot pi0.5 pipeline described in vla_foundation.md. The GR00T/openpi questions below no longer block the current baseline.
 **Purpose:** Record what is ready in the thesis work and what must be clarified before connecting a real VLA. No experiment or installation was performed for this inspection.
 
 ## What works now
