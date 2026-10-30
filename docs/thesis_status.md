@@ -1,15 +1,22 @@
 # Thesis implementation status
 
-**Last updated:** 23 October 2026
+**Last updated:** 30 October 2026
 **Canonical repository:** shared-autonomy-robot-learning
-**Active branch:** feat/pi05-libero-foundation
+**Active branch:** codex/ucl-pi05-evaluation
 
 ## Current status
 
-The LIBERO evaluation loop and LeRobot pi0.5 observation/action processing have
-been validated with simulation and mock inference. A pretrained checkpoint is
-cached on the Lenovo, but actual model loading and learned-policy inference
-remain untested because the current WSL memory allocation is too small.
+The UCL workstation now has a validated CUDA/EGL environment and the pinned,
+hash-verified checkpoint. Strict pretrained weight loading succeeded on GPU 1
+(RTX 3080, 10 GiB), but the first observation transfer ran out of VRAM before
+an action prediction. No real-policy episode or inference latency is established.
+The process exited and GPU memory was released. See ucl_workstation_setup.md
+for the measured memory peaks and deployment alternatives.
+
+The previous Lenovo RAM limitation remains separate historical context.
+Current UCL checks: 13 unit tests passed, two opt-in integrations passed
+separately, CUDA FP32/BF16 and EGL smoke passed, and a five-step mock rollout
+produced verified trajectory, metrics and video artifacts.
 
 ## Verified implementation
 
@@ -20,8 +27,8 @@ remain untested because the current WSL memory allocation is too small.
 | Policy bridge | LeRobot 0.6.2 pi0.5 processors, action postprocessing, chunk queue/reset and seven-value action validation | Actual weight-backed policy was not loaded on Lenovo |
 | Evaluator | Seeded episodes, action/state/config JSONL, metrics and synchronized camera video | Only a short mock rollout is recorded |
 | Mock result | LIBERO Spatial task 0, seed 123, three steps, OSMesa, mock zero-action policy; output copied to experiments/libero_mock_policy_smoke_2026-10-17/ | Intentionally capped; success 0.0, return 0.0; not a full episode or learned result |
-| Tests | Default suite 10 passed / 2 skipped; LIBERO simulation and authenticated processor integration tests have passed when enabled | No real pretrained inference test |
-| Checkpoint preparation | Pinned v044 checkpoint cached outside Git; revision recorded in docs/vla_foundation.md | Weights not loaded; no inference latency or memory peak measured |
+| Tests | UCL default suite 13 passed / 2 skipped; LIBERO EGL and authenticated processor integrations each passed explicitly | No real pretrained prediction established |
+| UCL checkpoint preparation | Pinned v044 files cached outside Git and SHA-256 verified; strict CPU load and GPU transfer succeeded | First observation exhausted VRAM before prediction; peak allocated 8.71 GiB, reserved 8.94 GiB, sampled total GPU 9,874 MiB |
 
 ## Lenovo CPU feasibility
 
@@ -56,8 +63,10 @@ or human-intervention results. See docs/hover-pilot-results.md.
 
 ## Next steps
 
-1. Run the pinned checkpoint on a suitable CUDA Linux host. Begin with one
-   LIBERO Spatial task 0 episode and inspect latency, memory, metrics and video.
+1. Establish a memory-feasible deployment of the same checkpoint: investigate
+   CPU offloading with validated device handling, or a GPU with more memory.
+   Then run one complete LIBERO Spatial task 0 episode and inspect latency,
+   memory, metrics and video. Full CPU inference is another untested option.
 2. If that run is stable, expand the real-policy baseline to reproducible seeds
    and report uncertainty intervals and failure cases.
 3. Only after establishing the learned baseline, implement and evaluate the

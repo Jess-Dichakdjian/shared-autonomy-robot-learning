@@ -1,10 +1,40 @@
 # Thesis evidence index
 
-**Updated:** 23 October 2026
+**Updated:** 30 October 2026
 **Canonical repository:** shared-autonomy-robot-learning
 **Active branch at capture:** feat/pi05-libero-foundation
 
 This index distinguishes the current simulation and processor evidence from the separately reported historical pretrained-model run.
+
+## UCL workstation verification - 30 October 2026
+
+See [ucl_workstation_setup.md](ucl_workstation_setup.md) for the environment,
+commands, pinned revisions, measured memory and offloading investigation.
+
+- Python 3.12, CUDA PyTorch 2.10.0+cu126, exact LeRobot source pin verified;
+  package consistency and small GPU FP32/BF16 checks passed.
+- Unit suite: 13 passed / 2 skipped. Each opt-in integration passed explicitly.
+- LIBERO Spatial task 0 passed NVIDIA EGL dual-camera/action smoke checks.
+- Five-step mock rollout, seed 123: state/action JSONL, metrics and decoded
+  512x256 video verified; success 0.0 and return 0.0 are mock-only evidence.
+- The v044 checkpoint was downloaded to persistent user storage and all LFS
+  hashes were verified against the pinned revision.
+- Strict pretrained weight loading succeeded. CUDA OOM occurred transferring
+  the first observation, before prediction or any evaluated environment step.
+  There is no real-policy success score, latency, trajectory or video.
+- Peak PyTorch allocated/reserved memory: 9,356,805,120 / 9,594,470,400 bytes.
+  Sampled total physical GPU memory peaked at 9,874 MiB, including rendering.
+  GPU use returned to 49 MiB after process exit.
+
+Local evidence (intentionally ignored by Git):
+
+- `outputs/ucl_setup_2026-10-30/`: dependency lock/logs, tests, preflight,
+  checkpoint identity/integrity, shape audit, real-attempt traceback and GPU
+  samples/summary, plus CPU primitive probe.
+- `outputs/ucl_mock_spatial_task0_2026-10-30/`: successful mock pipeline artifacts.
+- `outputs/ucl_pi05_spatial_task0_first_2026-10-30/`: failed real attempt's GPU
+  memory record and empty trajectory/episode files. Empty files are not a
+  rollout result. No metrics or video were produced.
 
 ## Curated, versioned experiment
 

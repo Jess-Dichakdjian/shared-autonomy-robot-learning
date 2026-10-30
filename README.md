@@ -4,6 +4,21 @@
 
 > **Status:** Active research project — implementation in progress.
 
+## UCL workstation update - 30 October 2026
+
+The isolated CUDA environment on LX00060258 is configured and verified with
+NVIDIA EGL on an RTX 3080. The unit suite reports 13 passed / 2 skipped; both
+opt-in integrations passed separately, and a five-step mock rollout produced
+verified trajectory, metrics and camera video artifacts.
+
+The pinned `lerobot/pi05_libero_finetuned_v044` checkpoint is now cached on
+the workstation and its file hashes are verified. Strict pretrained weight
+loading succeeded, but the first observation transfer exhausted the 10 GiB
+GPU before any action prediction. No real-policy rollout, success score or
+inference latency is established. CPU offloading or a GPU with more memory
+is the next deployment investigation. See
+[the workstation setup and failure evidence](docs/ucl_workstation_setup.md).
+
 ## Verified implementation update - 23 October 2026
 
 The canonical thesis repository now contains a tested LIBERO/LeRobot pi0.5
@@ -143,7 +158,7 @@ Unity XR interface for corrective demonstrations
 | Offline policy improvement | ⚪ Planned | Corrective demonstrations are intended for later policy fine-tuning / improvement |
 | Integrated shared-autonomy pipeline | ⚪ Planned | Full end-to-end system has not yet been implemented |
 | Evaluation pipeline | Mock validation only | One three-step mock-policy rollout and automated integration checks; no learned-policy benchmark result yet |
-| Real pretrained pi0.5 evaluation | Pending host capacity | Checkpoint cached locally; Lenovo CPU load was blocked by RAM headroom; run on a CUDA host next |
+| Real pretrained pi0.5 evaluation | Blocked by GPU memory in current UCL configuration | Strict weight load succeeded; first observation transfer ran out of VRAM before prediction; investigate offloading or a larger GPU |
 
 **Status key:**  
 ✅ Completed · 🟡 In progress / partially implemented · ⚪ Planned

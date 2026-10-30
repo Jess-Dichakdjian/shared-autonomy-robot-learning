@@ -3,6 +3,15 @@ import numpy as np
 from thesis_vla.pi05 import Pi05PolicyAdapter
 
 
+def test_runner_resolves_default_and_explicit_cuda_indices(monkeypatch):
+    import torch
+    from scripts.evaluate_libero_pi05 import _resolve_cuda_device
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 1)
+    assert _resolve_cuda_device("cuda") == torch.device("cuda:1")
+    assert _resolve_cuda_device("cuda:2") == torch.device("cuda:2")
+    assert _resolve_cuda_device("cpu") is None
+
+
 class ChunkPolicy:
     def predict_action_chunk(self, batch):
         result = np.zeros((1, 3, 7), dtype=np.float32)

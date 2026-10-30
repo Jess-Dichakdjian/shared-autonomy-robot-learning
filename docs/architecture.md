@@ -17,6 +17,12 @@ The real LeRobot pi0.5 tokenizer and preprocessors/postprocessors have been
 exercised against synthetic LIBERO observations, but pretrained policy weights
 have not been loaded on the Lenovo.
 
+On 30 October 2026 the UCL CUDA/EGL deployment strictly loaded the pinned
+pretrained weights, then exhausted GPU memory transferring the first real
+LIBERO observation before prediction. The learned inference path remains
+unverified. See ucl_workstation_setup.md for the measured failure and next
+deployment options.
+
 ## Observation and action contract
 
 - Cameras: agent view and wrist view, each RGB, 256x256, synchronized per step.

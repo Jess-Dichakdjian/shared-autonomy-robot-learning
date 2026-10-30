@@ -18,6 +18,13 @@ import sys
 import torch
 
 
+def _resolve_cuda_device(device):
+    selected = torch.device(device)
+    if selected.type != "cuda":
+        return None
+    return torch.device("cuda", torch.cuda.current_device() if selected.index is None else selected.index)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=Path, required=True,
@@ -38,7 +45,7 @@ def main():
         raise FileNotFoundError(f"local checkpoint directory not found: {args.checkpoint}")
     if args.device.startswith("cuda") and not torch.cuda.is_available():
         raise RuntimeError("CUDA was requested but torch.cuda.is_available() is false on this host.")
-    cuda_device = torch.device(args.device) if args.device.startswith("cuda") else None
+    cuda_device = _resolve_cuda_device(args.device)
     if cuda_device is not None:
         torch.cuda.set_device(cuda_device)
         torch.cuda.reset_peak_memory_stats(cuda_device)
@@ -88,6 +95,7 @@ def main():
             "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
             "torch_cuda_version": torch.version.cuda,
         }
+        (args.output / "run_config.json").write_text(json.dumps(run_config, indent=2) + "\n")
         result = run_evaluation(
             env, policy, args.output, episodes=args.episodes, base_seed=args.seed,
             task=task, configuration=run_config, max_steps=args.max_steps, record_video=True,

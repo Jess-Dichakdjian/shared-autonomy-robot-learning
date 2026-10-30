@@ -1,5 +1,11 @@
 # VLA foundation: LIBERO and LeRobot
 
+**UCL deployment update, 30 October 2026:** the workstation is configured and
+CUDA/EGL/mock-validated. Pinned checkpoint hashes match, and strict weight
+loading succeeded, but first-observation CUDA transfer exhausted the 10 GiB
+GPU before prediction. See [ucl_workstation_setup.md](ucl_workstation_setup.md)
+for current results. The Lenovo-specific observations below are historical.
+
 This branch adds the thesis integration under thesis_vla/. The existing MuJoCo
 hover pilot remains independent prior work. Its seven joint targets plus
 gripper distance are not interchangeable with LIBERO's seven-dimensional
