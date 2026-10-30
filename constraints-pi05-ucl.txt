@@ -1,0 +1,6 @@
+# Linux x86_64 deployment pairing. Install CUDA wheels from the official
+# cu126 index first; constraints alone do not select a CUDA wheel index.
+torch==2.10.0
+torchvision==0.25.0
+torchcodec==0.10.0
+hf-libero==0.1.4

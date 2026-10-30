@@ -2,3 +2,4 @@
 lerobot[libero,pi] @ git+https://github.com/huggingface/lerobot.git@146d8474932c8b566717eb2738ba459337ab71c4
 pytest>=8,<10
 cmake>=3.29,<4.2
+imageio[ffmpeg]>=2.34,<3

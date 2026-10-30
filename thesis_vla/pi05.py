@@ -34,15 +34,33 @@ class Pi05PolicyAdapter:
         if local_files_only and not Path(checkpoint).exists():
             raise FileNotFoundError(f"local checkpoint does not exist: {checkpoint}")
         from lerobot.policies.pi05.modeling_pi05 import PI05Policy
+        from lerobot.configs import PreTrainedConfig
+        from safetensors.torch import load_file
 
-        policy = PI05Policy.from_pretrained(checkpoint, local_files_only=local_files_only)
-        policy.eval()
-        if device is not None or dtype is not None:
-            policy.to(device=device, dtype=dtype)
-        if device is not None:
-            policy.config.device = device
+        checkpoint = Path(checkpoint)
+        weights = checkpoint / "model.safetensors"
+        if not weights.is_file():
+            raise FileNotFoundError(f"local checkpoint weights not found: {weights}")
+        config = PreTrainedConfig.from_pretrained(checkpoint, local_files_only=local_files_only)
+        # Construct/load on CPU to avoid a second GPU copy. The pinned upstream
+        # from_pretrained catches loading errors and can return random weights;
+        # use its exact key conversion with strict loading and propagate failures.
+        config.device = "cpu"
+        # Compilation is an execution optimization, not part of learned weights.
+        # Avoid checkpoint training-time max-autotune compilation on a 10 GiB GPU.
+        config.compile_model = False
+        config.gradient_checkpointing = False
         if dtype is not None:
-            policy.config.dtype = dtype
+            config.dtype = dtype
+        policy = PI05Policy(config)
+        state = load_file(str(weights), device="cpu")
+        converted = policy._convert_openpi_state_dict(state)
+        policy.load_state_dict(converted, strict=True)
+        del converted, state
+        policy.eval()
+        if device is not None:
+            policy.to(device=device)
+            policy.config.device = device
         return cls.from_lerobot_policy(
             policy, task=task, execute_steps=execute_steps, env_config=env_config,
             pretrained_path=checkpoint,
@@ -63,7 +81,8 @@ class Pi05PolicyAdapter:
         from thesis_vla.libero import LiberoTaskConfig, make_lerobot_env_config
 
         preprocessor, policy_postprocessor = make_pre_post_processors(
-            policy_cfg=policy.config, pretrained_path=pretrained_path)
+            policy_cfg=policy.config, pretrained_path=pretrained_path,
+            preprocessor_overrides={"device_processor": {"device": policy.config.device}})
         env_preprocessor, env_postprocessor = make_env_pre_post_processors(
             env_cfg=make_lerobot_env_config(env_config or LiberoTaskConfig()),
             policy_cfg=policy.config)

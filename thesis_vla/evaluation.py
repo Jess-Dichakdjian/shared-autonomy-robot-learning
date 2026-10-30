@@ -52,6 +52,11 @@ def run_evaluation(env, policy, output_dir: str | Path, *, episodes: int, base_s
     with step_path.open("w", encoding="utf-8") as steps_file, episode_path.open("w", encoding="utf-8") as episode_file:
         for episode_index in range(episodes):
             seed = base_seed + episode_index
+            import random
+            import torch
+            random.seed(seed)
+            np.random.seed(seed)
+            torch.manual_seed(seed)
             policy.reset()
             observation, reset_info = env.reset(seed=seed)
             frames = [_camera_montage(observation)] if record_video else []

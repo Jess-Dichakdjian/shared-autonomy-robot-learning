@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import platform
+import os
 import resource
 import time
 from pathlib import Path
@@ -28,7 +29,7 @@ def main():
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--execute-steps", type=int, default=10)
     parser.add_argument("--device", default="cuda", help="inference device; cpu is accepted when RAM headroom permits")
-    parser.add_argument("--dtype", choices=("auto", "float16", "bfloat16", "float32"), default="auto")
+    parser.add_argument("--dtype", choices=("auto", "bfloat16", "float32"), default="auto")
     parser.add_argument("--output", type=Path, default=Path("outputs/pi05_libero"))
     parser.add_argument("--gl", choices=("osmesa", "egl", "glfw"), default="osmesa")
     args = parser.parse_args()
@@ -37,6 +38,11 @@ def main():
         raise FileNotFoundError(f"local checkpoint directory not found: {args.checkpoint}")
     if args.device.startswith("cuda") and not torch.cuda.is_available():
         raise RuntimeError("CUDA was requested but torch.cuda.is_available() is false on this host.")
+    cuda_device = torch.device(args.device) if args.device.startswith("cuda") else None
+    if cuda_device is not None:
+        torch.cuda.set_device(cuda_device)
+        torch.cuda.reset_peak_memory_stats(cuda_device)
+    args.output.mkdir(parents=True, exist_ok=True)
 
     repo_root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(repo_root))
@@ -70,12 +76,17 @@ def main():
             "renderer": args.gl, "policy": "lerobot_pi05",
             "checkpoint": str(args.checkpoint.resolve()), "device": args.device,
             "dtype": str(getattr(model_config, "dtype", "checkpoint_default")),
+            "compile_model": model_config.compile_model,
+            "gradient_checkpointing": model_config.gradient_checkpointing,
+            "weight_loading": "strict_cpu_then_device",
             "execute_steps": args.execute_steps, "seed_rule": "base_seed + episode_index",
             "torch_version": torch.__version__, "policy_load_seconds": policy_load_seconds,
             "process_peak_rss_bytes_after_load": load_peak_bytes,
             "cpu_name": platform.processor() if args.device == "cpu" else None,
             "cpu_threads": torch.get_num_threads() if args.device == "cpu" else None,
-            "gpu_name": torch.cuda.get_device_name(0) if args.device.startswith("cuda") else None,
+            "gpu_name": torch.cuda.get_device_name(cuda_device) if cuda_device is not None else None,
+            "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
+            "torch_cuda_version": torch.version.cuda,
         }
         result = run_evaluation(
             env, policy, args.output, episodes=args.episodes, base_seed=args.seed,
@@ -83,6 +94,16 @@ def main():
         )
         print(json.dumps({k: result[k] for k in ("episodes", "success_rate", "mean_return", "mean_steps")}))
     finally:
+        if cuda_device is not None:
+            memory = {
+                "device": args.device,
+                "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
+                "peak_allocated_bytes": torch.cuda.max_memory_allocated(cuda_device),
+                "peak_reserved_bytes": torch.cuda.max_memory_reserved(cuda_device),
+                "completed": sys.exc_info()[0] is None,
+                "note": "PyTorch allocator peaks; external GPU usage requires nvidia-smi monitoring",
+            }
+            (args.output / "gpu_memory.json").write_text(json.dumps(memory, indent=2) + "\n")
         env.close()
     return 0
 
