@@ -6,8 +6,17 @@
 
 ## Current status
 
-Real pretrained inference and one successful LIBERO-Spatial task-0 episode are
-verified on UCL. The pinned, hash-verified checkpoint runs with EGL on GPU 0,
+The next milestone is now complete: 20 real pretrained task-0 episodes, with
+20 successes and no failures (95% Wilson interval 83.89%–100%). Explicit saved
+initial-state indices and seeds cover 0–19. There are 161 GP-ready chunk-start
+pairs and 1,536 step records, with validated videos, timing and memory evidence.
+The benchmark and monitor have exited; no episodes remain in this batch.
+See pi05_spatial20_results.md and pi05_multi_episode_protocol.md. GP training
+has not started. Final suite: 22 passed / 3 skipped; explicit integrations passed.
+
+The earlier feasibility milestone verified real inference and one successful
+LIBERO-Spatial task-0 episode. The same pinned, hash-verified checkpoint runs
+with EGL on GPU 0,
 active inference on GPU 1, and unused vocabulary output heads retained in RAM.
 Checkpoint weights, mixed precision and normalization are unchanged. A full
 action chunk passed a bitwise consistency gate before the successful 78-step
@@ -25,10 +34,10 @@ produced verified trajectory, metrics and video artifacts.
 | LIBERO | Spatial task 0 EGL rendering, two 256x256 cameras and relative OSC actions during a complete episode | One task/episode only |
 | Observation contract | Eight-value state, two cameras plus checkpoint empty camera, saved tokenization/normalization; device shim preserves original pixels/masks bitwise | Tested pinned configuration only |
 | Policy bridge | Real predictions, strict loading, CPU head placement guards and full-chunk numerical consistency | Original all-on-one-GPU forward cannot fit for direct reference |
-| Evaluator | Successful 78-step episode, state/action/config JSONL, metrics, chunk latency, memory and synchronized video | Seed 0; gate state 0 and episode saved initial state 1 |
+| Evaluator | 20 successful episodes; state/action/config JSONL, chunk-start GP export, metrics, latency, memory and synchronized video | Single task, explicit seeds/states 0–19; no failure examples |
 | Mock result | LIBERO Spatial task 0, seed 123, three steps, OSMesa, mock zero-action policy; output copied to experiments/libero_mock_policy_smoke_2026-10-17/ | Intentionally capped; success 0.0, return 0.0; not a full episode or learned result |
-| Tests | UCL default suite 18 passed / 2 skipped; earlier EGL and authenticated processor integrations each passed explicitly | No multi-seed benchmark |
-| UCL real pretrained result | Success, return 1.0, 78 steps; first prediction 0.561 s; mean chunk latency 0.292 s; sampled episode GPU 1 peak 9,035 MiB | One feasibility result; initial full-GPU OOM remains historical evidence |
+| Tests | Final suite 22 passed / 3 skipped; explicit simulator tests 2 passed and processor integration 1 passed | GPU placement tests use the available two-GPU host |
+| UCL real pretrained result | 20/20 successes; mean length 76.8; 161 prediction points; mean chunk latency 0.299 s; sampled GPU 1 peak 9,005 MiB | Fixed single-task batch; initial OOM and first feasibility result remain historical |
 
 ## Lenovo CPU feasibility
 
@@ -55,7 +64,7 @@ or human-intervention results. See docs/hover-pilot-results.md.
 
 ## Not implemented or not established
 
-- Multi-seed learned-policy success rates and final thesis benchmarks.
+- Broader multi-task benchmarks, failure-case uncertainty validation and final thesis evaluation.
 - GP uncertainty estimates or uncertainty-triggered intervention.
 - XR interface, human correction collection or learning from corrections.
 - Fine-tuning or policy improvement from corrective demonstrations.

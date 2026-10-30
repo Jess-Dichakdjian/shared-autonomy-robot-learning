@@ -6,6 +6,25 @@
 
 This index distinguishes the current simulation and processor evidence from the separately reported historical pretrained-model run.
 
+## Twenty-episode real evaluation and GP export - 30 October 2026
+
+See [pi05_spatial20_results.md](pi05_spatial20_results.md) and
+[pi05_multi_episode_protocol.md](pi05_multi_episode_protocol.md).
+
+- 20/20 real pretrained successes, explicit seeds/states 0–19, 20 unique saved
+  state hashes; 95% Wilson interval 83.89%–100%; no task failures/timeouts.
+- 1,536 validated steps and 161 fresh prediction points. GP `X` is exact
+  checkpoint-normalized state; horizon-zero raw `Y`, physical state, executed
+  action, full chunks and provenance are retained. Normalization audit error 0.0.
+- All episode videos/metrics/trajectories, dataset hashes and portable NPZ
+  matrices validated. Final tests: 22 passed / 3 skipped; explicit real simulator
+  and processor integrations: 2 and 1 passed before evaluation.
+- Raw root: `outputs/ucl_pi05_spatial20_2026-10-30/`; transfer archive:
+  `gp_dataset_bundle.tar.gz` under that root, with adjacent SHA-256.
+- On requested shutdown, SIGINT was sent to the evaluation and monitoring
+  processes; all 20 episodes had completed by handling. Both exited; final
+  validation found no partial episodes. No additional run was started.
+
 ## Real pretrained UCL result - 30 October 2026
 
 See [pi05_memory_placement.md](pi05_memory_placement.md). Unused vocabulary

@@ -60,3 +60,6 @@ def test_real_pi05_tokenizer_and_processors_preserve_libero_contract():
     assert proposal.predicted_action.shape == (7,)
     assert proposal.executed_action.shape == (7,)
     assert np.isfinite(proposal.executed_action).all()
+    assert adapter.prediction_state_capture["physical"].shape == (8,)
+    np.testing.assert_array_equal(adapter.prediction_state_capture["physical"], np.zeros(8))
+    np.testing.assert_array_equal(adapter.prediction_state_capture["vla_normalized"], prepared["observation.state"].numpy()[0])

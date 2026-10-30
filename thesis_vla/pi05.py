@@ -83,6 +83,7 @@ class Pi05PolicyAdapter:
         from lerobot.policies.factory import make_pre_post_processors
         from lerobot.utils.constants import ACTION
         from thesis_vla.libero import LiberoTaskConfig, make_lerobot_env_config
+        state_capture = {}
 
         preprocessor, policy_postprocessor = make_pre_post_processors(
             policy_cfg=policy.config, pretrained_path=pretrained_path,
@@ -94,12 +95,18 @@ class Pi05PolicyAdapter:
         def prepare(raw_observation, instruction):
             batch = preprocess_observation({k: _add_batch(v) for k, v in raw_observation.items()})
             batch["task"] = [instruction]
-            return preprocessor(env_preprocessor(batch))
+            batch = env_preprocessor(batch)
+            state_capture["physical"] = batch["observation.state"].detach().cpu().float().numpy()[0].copy()
+            batch = preprocessor(batch)
+            state_capture["vla_normalized"] = batch["observation.state"].detach().cpu().float().numpy()[0].copy()
+            return batch
 
         def process_action(chunk):
             return _process_chunk(chunk, policy_postprocessor, env_postprocessor, ACTION)
 
-        return cls(policy, prepare, process_action, task=task, execute_steps=execute_steps)
+        adapter = cls(policy, prepare, process_action, task=task, execute_steps=execute_steps)
+        adapter.prediction_state_capture = state_capture
+        return adapter
 
     def act(self, observation):
         if not self._queue:

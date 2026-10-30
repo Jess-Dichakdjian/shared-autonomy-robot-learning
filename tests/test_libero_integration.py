@@ -52,3 +52,21 @@ def test_real_libero_mock_evaluation_writes_rollout_artifacts(tmp_path):
     assert (tmp_path / "steps.jsonl").is_file()
     assert (tmp_path / "episodes.jsonl").is_file()
     assert (tmp_path / "episode_000.mp4").stat().st_size > 0
+
+
+def test_explicit_saved_state_selection_overrides_previous_resets():
+    from scripts.libero_smoke import prepare_config_and_assets
+    from thesis_vla.libero import LiberoTaskConfig, LiberoVectorAdapter, create_vector_env
+    prepare_config_and_assets()
+    env = LiberoVectorAdapter(create_vector_env(LiberoTaskConfig(), gl=os.environ.get("MUJOCO_GL", "osmesa")))
+    try:
+        _, first = env.reset(seed=123, options={"saved_init_state_index": 0})
+        _, other = env.reset(seed=123, options={"saved_init_state_index": 3})
+        _, repeated = env.reset(seed=123, options={"saved_init_state_index": 0})
+        assert first["saved_init_state_sha256"] == repeated["saved_init_state_sha256"]
+        assert first["saved_init_state_sha256"] != other["saved_init_state_sha256"]
+        assert repeated["saved_init_state_index"] == 0
+        assert env.env.envs[0].unwrapped.init_state_id == 1
+        assert set(first["initial_camera_sha256"]) == {"image", "image2"}
+    finally:
+        env.close()

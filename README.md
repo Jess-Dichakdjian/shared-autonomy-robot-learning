@@ -4,6 +4,18 @@
 
 > **Status:** Active research project — implementation in progress.
 
+## Multi-episode evaluation and GP dataset - 30 October 2026
+
+The fixed pretrained configuration completed 20 real LIBERO-Spatial task-0
+episodes: **20 successes, 0 failures**, with a 95% Wilson interval of
+83.89%–100%. Seeds and saved initial-state indices 0–19 were explicitly
+controlled. The export contains 161 correctly aligned chunk-start state/action
+pairs and 1,536 full trajectory steps. Raw evidence stays in persistent UCL
+storage outside Git. No GP fitting has begun.
+
+See [results and shutdown status](docs/pi05_spatial20_results.md) and
+[evaluation, export and recovery protocol](docs/pi05_multi_episode_protocol.md).
+
 ## Real pretrained inference verified - 30 October 2026
 
 The pinned pi0.5 checkpoint now performs real inference on LX00060258. The
@@ -73,11 +85,11 @@ At the current stage of the project:
 
 - literature review and research pipeline definition are complete
 - initial diffusion-policy setup and small-scale testing have been performed
-- Real pretrained pi0.5 inference and one successful LIBERO-Spatial task-0 episode are verified; multi-seed evaluation is pending
+- Real pretrained pi0.5 inference and 20 successful LIBERO-Spatial task-0 episodes are verified; broader task evaluation remains pending
 - an earlier scripted-hover baseline used a UCL MuJoCo Franka benchmark; the current VLA evaluation foundation is separate and uses LIBERO
 - XR-based human corrective demonstrations and uncertainty-aware shared autonomy are planned for later stages
 
-One pretrained feasibility episode is available; final learned-policy benchmarks
+Twenty pretrained task-0 episodes are available; broader learned-policy benchmarks
 and shared-autonomy results remain pending. Earlier hover and mock evidence are
 documented separately.
 
@@ -176,7 +188,7 @@ Unity XR interface for corrective demonstrations
 | Online uncertainty-model update | ⚪ Planned | Intended to incorporate information from human corrective demonstrations |
 | Offline policy improvement | ⚪ Planned | Corrective demonstrations are intended for later policy fine-tuning / improvement |
 | Integrated shared-autonomy pipeline | ⚪ Planned | Full end-to-end system has not yet been implemented |
-| Evaluation pipeline | Real rollout verified | One successful 78-step pretrained episode with metrics, state/action trajectory, latency, memory and video; multi-seed benchmark pending |
+| Evaluation pipeline | Twenty-episode evaluation verified | 20/20 successful task-0 episodes with explicit seeds/states, 161 chunk-start GP pairs, trajectories, metrics, latency, memory and video |
 | Real pretrained pi0.5 evaluation | Feasibility established on UCL | EGL on GPU 0, active inference on GPU 1, unused output heads retained in CPU RAM; checkpoint math and normalization preserved |
 
 **Status key:**  
