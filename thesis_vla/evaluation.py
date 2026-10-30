@@ -52,19 +52,31 @@ def run_evaluation(env, policy, output_dir: str | Path, *, episodes: int, base_s
     with step_path.open("w", encoding="utf-8") as steps_file, episode_path.open("w", encoding="utf-8") as episode_file:
         for episode_index in range(episodes):
             seed = base_seed + episode_index
+            import random
+            import torch
+            random.seed(seed)
+            np.random.seed(seed)
+            torch.manual_seed(seed)
             policy.reset()
             observation, reset_info = env.reset(seed=seed)
             frames = [_camera_montage(observation)] if record_video else []
             total_reward, success = 0.0, _success_value(reset_info)
             terminated = truncated = False
             step_count = 0
+            started_at = time.time()
+            prediction_step = None
+            prediction_started_at = None
             video_path = output / f"episode_{episode_index:03d}.mp4"
             while not (terminated or truncated) and (max_steps is None or step_count < max_steps):
                 import torch
                 inference_started = time.perf_counter()
+                act_started_at = time.time()
                 with torch.inference_mode():
                     proposal = policy.act(observation)
                 inference_seconds = time.perf_counter() - inference_started
+                if proposal.is_chunk_start:
+                    prediction_step = step_count
+                    prediction_started_at = act_started_at
                 next_observation, reward, terminated, truncated, info = env.step(proposal.executed_action)
                 total_reward += reward
                 step_count += 1
@@ -81,8 +93,16 @@ def run_evaluation(env, policy, output_dir: str | Path, *, episodes: int, base_s
                     "robot_state": _robot_state(observation), "next_robot_state": _robot_state(next_observation),
                     "reward": reward, "terminated": terminated, "truncated": truncated,
                     "success": found_success, "configuration": config_record,
+                    "episode_id": configuration.get("episode_id", episode_index),
+                    "saved_init_state_index": reset_info.get("saved_init_state_index"),
+                    "prediction_step": prediction_step,
+                    "prediction_started_at": prediction_started_at,
+                    "prediction_state": getattr(policy, "prediction_state_capture", {}),
+                    "predicted_chunk": getattr(policy, "last_predicted_chunk", None) if proposal.is_chunk_start else None,
+                    "wall_time_seconds": time.time(), "episode_elapsed_seconds": time.time() - started_at,
                 }
                 steps_file.write(json.dumps(_jsonable(record), separators=(",", ":")) + "\n")
+                steps_file.flush()
                 observation = next_observation
 
             if record_video and frames:
@@ -92,6 +112,8 @@ def run_evaluation(env, policy, output_dir: str | Path, *, episodes: int, base_s
                 "return": total_reward, "steps": step_count, "terminated": terminated,
                 "truncated": truncated, "video": video_path.name if record_video else None,
                 "reset_info": reset_info, "configuration": config_record,
+                "termination_reason": "success" if success and terminated else "environment_timeout" if truncated else "terminal_failure" if terminated else "evaluation_limit",
+                "started_at": started_at, "ended_at": time.time(),
             }
             episode_file.write(json.dumps(_jsonable(episode_record), separators=(",", ":")) + "\n")
             all_episodes.append(episode_record)

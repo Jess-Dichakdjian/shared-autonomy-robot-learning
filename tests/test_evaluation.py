@@ -81,3 +81,24 @@ def test_evaluator_honors_step_cap_and_optional_video(tmp_path):
     assert not list(tmp_path.glob("*.mp4"))
     row = json.loads((tmp_path / "steps.jsonl").read_text().strip())
     assert row["truncated"] is False and row["terminated"] is False
+
+
+def test_evaluation_reseeds_stochastic_policy_per_episode(tmp_path):
+    import torch
+
+    class StochasticPolicy(FakePolicy):
+        def act(self, observation):
+            raw = torch.rand(7).numpy()
+            return ActionProposal(raw, raw.copy(), 1, 0, True)
+
+    for name in ("first", "repeat"):
+        run_evaluation(
+            FakeEnv(), StochasticPolicy(), tmp_path / name,
+            episodes=2, base_seed=41, task="fixture", configuration={},
+            max_steps=1, record_video=False,
+        )
+    def actions(name):
+        return [json.loads(row)["predicted_action"] for row in
+                (tmp_path / name / "steps.jsonl").read_text().splitlines()]
+    assert actions("first") == actions("repeat")
+    assert actions("first")[0] != actions("first")[1]

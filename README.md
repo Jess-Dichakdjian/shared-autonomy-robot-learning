@@ -4,7 +4,51 @@
 
 > **Status:** Active research project — implementation in progress.
 
-## Verified implementation update - 23 October 2026
+## Multi-episode evaluation and GP dataset - 30 October 2026
+
+The fixed pretrained configuration completed 20 real LIBERO-Spatial task-0
+episodes: **20 successes, 0 failures**, with a 95% Wilson interval of
+83.89%–100%. Seeds and saved initial-state indices 0–19 were explicitly
+controlled. The export contains 161 correctly aligned chunk-start state/action
+pairs and 1,536 full trajectory steps. Raw evidence stays in persistent UCL
+storage outside Git. No GP fitting has begun.
+
+See [results and shutdown status](docs/pi05_spatial20_results.md) and
+[evaluation, export and recovery protocol](docs/pi05_multi_episode_protocol.md).
+
+## Real pretrained inference verified - 30 October 2026
+
+The pinned pi0.5 checkpoint now performs real inference on LX00060258. The
+smallest working configuration renders with EGL on GPU 0, runs active inference
+on GPU 1, and retains unused vocabulary output heads in system RAM. Weights,
+mixed precision, checkpoint normalization and action processing are preserved.
+
+A full 50-action prediction passed a bitwise numerical-consistency gate. One
+complete LIBERO-Spatial task-0 episode succeeded in 78 steps, with verified
+trajectory, metrics and dual-camera video. Mean chunk prediction latency was
+0.292 s; sampled episode GPU 1 use peaked at 9,035 MiB. Seed 0 was used; the
+gate reset consumed saved initial state 0 and the episode used state 1.
+
+The suite reports 18 passed / 2 skipped, including placement and pixel/mask
+equivalence tests. This is one feasibility result, not a multi-seed benchmark.
+See [placement, tests, commands and evidence](docs/pi05_memory_placement.md).
+
+## Initial UCL workstation attempt - 30 October 2026
+
+The isolated CUDA environment on LX00060258 is configured and verified with
+NVIDIA EGL on an RTX 3080. The unit suite reports 13 passed / 2 skipped; both
+opt-in integrations passed separately, and a five-step mock rollout produced
+verified trajectory, metrics and camera video artifacts.
+
+The pinned `lerobot/pi05_libero_finetuned_v044` checkpoint is now cached on
+the workstation and its file hashes are verified. Strict pretrained weight
+loading succeeded, but the first observation transfer exhausted the 10 GiB
+GPU before any action prediction. No real-policy rollout, success score or
+inference latency is established. CPU offloading or a GPU with more memory
+is the next deployment investigation. See
+[the workstation setup and failure evidence](docs/ucl_workstation_setup.md).
+
+## Historical implementation update - 23 October 2026
 
 The canonical thesis repository now contains a tested LIBERO/LeRobot pi0.5
 evaluation foundation. The current evidence is a **mock-policy pipeline test**;
@@ -41,11 +85,13 @@ At the current stage of the project:
 
 - literature review and research pipeline definition are complete
 - initial diffusion-policy setup and small-scale testing have been performed
-- The LIBERO/LeRobot pi0.5 evaluation foundation is mock-validated; pretrained inference is pending
+- Real pretrained pi0.5 inference and 20 successful LIBERO-Spatial task-0 episodes are verified; broader task evaluation remains pending
 - an earlier scripted-hover baseline used a UCL MuJoCo Franka benchmark; the current VLA evaluation foundation is separate and uses LIBERO
 - XR-based human corrective demonstrations and uncertainty-aware shared autonomy are planned for later stages
 
-No final learned-policy or shared-autonomy results are available yet. The earlier scripted-hover pilot and current mock-policy pipeline check are documented separately.
+Twenty pretrained task-0 episodes are available; broader learned-policy benchmarks
+and shared-autonomy results remain pending. Earlier hover and mock evidence are
+documented separately.
 
 ## Research Problem
 
@@ -131,7 +177,7 @@ Unity XR interface for corrective demonstrations
 |---|---|---|
 | Literature review & system design | ✅ Completed | Research direction, system architecture and planned experimental pipeline defined |
 | Diffusion Policy | 🟡 Initial testing | Existing implementation downloaded, configured and used for small-scale testing |
-| VLA model | Foundation tested; pretrained inference pending | LeRobot pi0.5 tokenizer/processors and the LIBERO adapter were exercised with mock inference; weights have not been loaded on Lenovo |
+| VLA model | Real pretrained inference verified | Pinned checkpoint performs real predictions on UCL with unused output heads in RAM and active inference on GPU 1 |
 | LIBERO simulation | Integration tested | LIBERO Spatial task 0 resets, renders both cameras and accepts seven-value relative OSC actions under OSMesa |
 | Earlier MuJoCo hover baseline | Historical pilot | Separate scripted hover experiment; not a VLA or shared-autonomy result |
 | Manipulation task | 🟡 In development | Square manipulation is the main target task; simpler tasks may be used for debugging |
@@ -142,8 +188,8 @@ Unity XR interface for corrective demonstrations
 | Online uncertainty-model update | ⚪ Planned | Intended to incorporate information from human corrective demonstrations |
 | Offline policy improvement | ⚪ Planned | Corrective demonstrations are intended for later policy fine-tuning / improvement |
 | Integrated shared-autonomy pipeline | ⚪ Planned | Full end-to-end system has not yet been implemented |
-| Evaluation pipeline | Mock validation only | One three-step mock-policy rollout and automated integration checks; no learned-policy benchmark result yet |
-| Real pretrained pi0.5 evaluation | Pending host capacity | Checkpoint cached locally; Lenovo CPU load was blocked by RAM headroom; run on a CUDA host next |
+| Evaluation pipeline | Twenty-episode evaluation verified | 20/20 successful task-0 episodes with explicit seeds/states, 161 chunk-start GP pairs, trajectories, metrics, latency, memory and video |
+| Real pretrained pi0.5 evaluation | Feasibility established on UCL | EGL on GPU 0, active inference on GPU 1, unused output heads retained in CPU RAM; checkpoint math and normalization preserved |
 
 **Status key:**  
 ✅ Completed · 🟡 In progress / partially implemented · ⚪ Planned

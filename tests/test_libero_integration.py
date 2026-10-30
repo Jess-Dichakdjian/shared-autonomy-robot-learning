@@ -7,7 +7,7 @@ import pytest
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("RUN_LIBERO_INTEGRATION") != "1",
-    reason="set RUN_LIBERO_INTEGRATION=1 to run the real OSMesa LIBERO integration test",
+    reason="set RUN_LIBERO_INTEGRATION=1 to run the real LIBERO integration test",
 )
 
 
@@ -16,12 +16,12 @@ def test_real_libero_mock_evaluation_writes_rollout_artifacts(tmp_path):
     from thesis_vla.evaluation import make_lerobot_mock_adapter, run_evaluation
     from thesis_vla.libero import LiberoTaskConfig, LiberoVectorAdapter, create_vector_env
 
-    os.environ["MUJOCO_GL"] = "osmesa"
+    renderer = os.environ.get("MUJOCO_GL", "osmesa")
     prepare_config_and_assets()
     config = LiberoTaskConfig(suite="libero_spatial", task_id=0)
     from libero.libero.benchmark import get_benchmark_dict
     task = str(get_benchmark_dict()[config.suite]().get_task(config.task_id).language)
-    raw_env = create_vector_env(config, gl="osmesa")
+    raw_env = create_vector_env(config, gl=renderer)
     env = LiberoVectorAdapter(raw_env)
 
     class MockChunkPolicy:
@@ -40,7 +40,7 @@ def test_real_libero_mock_evaluation_writes_rollout_artifacts(tmp_path):
         result = run_evaluation(
             env, policy, tmp_path, episodes=1, base_seed=900, task=task,
             configuration={"suite": config.suite, "task_id": config.task_id, "fps": config.fps,
-                           "renderer": "osmesa"},
+                           "renderer": renderer},
             max_steps=2, record_video=True,
         )
     finally:
@@ -52,3 +52,21 @@ def test_real_libero_mock_evaluation_writes_rollout_artifacts(tmp_path):
     assert (tmp_path / "steps.jsonl").is_file()
     assert (tmp_path / "episodes.jsonl").is_file()
     assert (tmp_path / "episode_000.mp4").stat().st_size > 0
+
+
+def test_explicit_saved_state_selection_overrides_previous_resets():
+    from scripts.libero_smoke import prepare_config_and_assets
+    from thesis_vla.libero import LiberoTaskConfig, LiberoVectorAdapter, create_vector_env
+    prepare_config_and_assets()
+    env = LiberoVectorAdapter(create_vector_env(LiberoTaskConfig(), gl=os.environ.get("MUJOCO_GL", "osmesa")))
+    try:
+        _, first = env.reset(seed=123, options={"saved_init_state_index": 0})
+        _, other = env.reset(seed=123, options={"saved_init_state_index": 3})
+        _, repeated = env.reset(seed=123, options={"saved_init_state_index": 0})
+        assert first["saved_init_state_sha256"] == repeated["saved_init_state_sha256"]
+        assert first["saved_init_state_sha256"] != other["saved_init_state_sha256"]
+        assert repeated["saved_init_state_index"] == 0
+        assert env.env.envs[0].unwrapped.init_state_id == 1
+        assert set(first["initial_camera_sha256"]) == {"image", "image2"}
+    finally:
+        env.close()

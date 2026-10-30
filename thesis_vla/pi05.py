@@ -29,20 +29,42 @@ class Pi05PolicyAdapter:
 
     @classmethod
     def from_pretrained(cls, checkpoint, *, task, execute_steps=10, local_files_only=True,
-                        env_config=None, device=None, dtype=None):
+                        env_config=None, device=None, dtype=None, cpu_output_heads=False):
         """Load a local checkpoint on demand; never download weights by default."""
         if local_files_only and not Path(checkpoint).exists():
             raise FileNotFoundError(f"local checkpoint does not exist: {checkpoint}")
         from lerobot.policies.pi05.modeling_pi05 import PI05Policy
+        from lerobot.configs import PreTrainedConfig
+        from safetensors.torch import load_file
 
-        policy = PI05Policy.from_pretrained(checkpoint, local_files_only=local_files_only)
-        policy.eval()
-        if device is not None or dtype is not None:
-            policy.to(device=device, dtype=dtype)
-        if device is not None:
-            policy.config.device = device
+        checkpoint = Path(checkpoint)
+        weights = checkpoint / "model.safetensors"
+        if not weights.is_file():
+            raise FileNotFoundError(f"local checkpoint weights not found: {weights}")
+        config = PreTrainedConfig.from_pretrained(checkpoint, local_files_only=local_files_only)
+        # Construct/load on CPU to avoid a second GPU copy. The pinned upstream
+        # from_pretrained catches loading errors and can return random weights;
+        # use its exact key conversion with strict loading and propagate failures.
+        config.device = "cpu"
+        # Compilation is an execution optimization, not part of learned weights.
+        # Avoid checkpoint training-time max-autotune compilation on a 10 GiB GPU.
+        config.compile_model = False
+        config.gradient_checkpointing = False
         if dtype is not None:
-            policy.config.dtype = dtype
+            config.dtype = dtype
+        policy = PI05Policy(config)
+        state = load_file(str(weights), device="cpu")
+        converted = policy._convert_openpi_state_dict(state)
+        policy.load_state_dict(converted, strict=True)
+        del converted, state
+        policy.eval()
+        if cpu_output_heads:
+            from thesis_vla.placement import place_action_policy
+            policy.placement_report = place_action_policy(policy, device)
+            policy.config.device = device
+        elif device is not None:
+            policy.to(device=device)
+            policy.config.device = device
         return cls.from_lerobot_policy(
             policy, task=task, execute_steps=execute_steps, env_config=env_config,
             pretrained_path=checkpoint,
@@ -61,9 +83,11 @@ class Pi05PolicyAdapter:
         from lerobot.policies.factory import make_pre_post_processors
         from lerobot.utils.constants import ACTION
         from thesis_vla.libero import LiberoTaskConfig, make_lerobot_env_config
+        state_capture = {}
 
         preprocessor, policy_postprocessor = make_pre_post_processors(
-            policy_cfg=policy.config, pretrained_path=pretrained_path)
+            policy_cfg=policy.config, pretrained_path=pretrained_path,
+            preprocessor_overrides={"device_processor": {"device": policy.config.device}})
         env_preprocessor, env_postprocessor = make_env_pre_post_processors(
             env_cfg=make_lerobot_env_config(env_config or LiberoTaskConfig()),
             policy_cfg=policy.config)
@@ -71,12 +95,18 @@ class Pi05PolicyAdapter:
         def prepare(raw_observation, instruction):
             batch = preprocess_observation({k: _add_batch(v) for k, v in raw_observation.items()})
             batch["task"] = [instruction]
-            return preprocessor(env_preprocessor(batch))
+            batch = env_preprocessor(batch)
+            state_capture["physical"] = batch["observation.state"].detach().cpu().float().numpy()[0].copy()
+            batch = preprocessor(batch)
+            state_capture["vla_normalized"] = batch["observation.state"].detach().cpu().float().numpy()[0].copy()
+            return batch
 
         def process_action(chunk):
             return _process_chunk(chunk, policy_postprocessor, env_postprocessor, ACTION)
 
-        return cls(policy, prepare, process_action, task=task, execute_steps=execute_steps)
+        adapter = cls(policy, prepare, process_action, task=task, execute_steps=execute_steps)
+        adapter.prediction_state_capture = state_capture
+        return adapter
 
     def act(self, observation):
         if not self._queue:
@@ -87,6 +117,7 @@ class Pi05PolicyAdapter:
                 raise ValueError(f"expected chunk shape (1, T, 7), got {raw.shape}")
             if raw.shape[1] == 0 or not np.isfinite(raw).all():
                 raise ValueError("policy returned empty or non-finite actions")
+            self.last_predicted_chunk = raw.astype(np.float32, copy=True)
             processed = self.postprocess_action(prediction)
             processed = processed.detach().cpu().numpy() if hasattr(processed, "detach") else np.asarray(processed)
             if processed.shape != raw.shape:

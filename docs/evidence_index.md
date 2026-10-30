@@ -1,10 +1,80 @@
 # Thesis evidence index
 
-**Updated:** 23 October 2026
+**Updated:** 30 October 2026
 **Canonical repository:** shared-autonomy-robot-learning
 **Active branch at capture:** feat/pi05-libero-foundation
 
 This index distinguishes the current simulation and processor evidence from the separately reported historical pretrained-model run.
+
+## Twenty-episode real evaluation and GP export - 30 October 2026
+
+See [pi05_spatial20_results.md](pi05_spatial20_results.md) and
+[pi05_multi_episode_protocol.md](pi05_multi_episode_protocol.md).
+
+- 20/20 real pretrained successes, explicit seeds/states 0–19, 20 unique saved
+  state hashes; 95% Wilson interval 83.89%–100%; no task failures/timeouts.
+- 1,536 validated steps and 161 fresh prediction points. GP `X` is exact
+  checkpoint-normalized state; horizon-zero raw `Y`, physical state, executed
+  action, full chunks and provenance are retained. Normalization audit error 0.0.
+- All episode videos/metrics/trajectories, dataset hashes and portable NPZ
+  matrices validated. Final tests: 22 passed / 3 skipped; explicit real simulator
+  and processor integrations: 2 and 1 passed before evaluation.
+- Raw root: `outputs/ucl_pi05_spatial20_2026-10-30/`; transfer archive:
+  `gp_dataset_bundle.tar.gz` under that root, with adjacent SHA-256.
+- On requested shutdown, SIGINT was sent to the evaluation and monitoring
+  processes; all 20 episodes had completed by handling. Both exited; final
+  validation found no partial episodes. No additional run was started.
+
+## Real pretrained UCL result - 30 October 2026
+
+See [pi05_memory_placement.md](pi05_memory_placement.md). Unused vocabulary
+heads remain in RAM, active inference runs on GPU 1, and EGL renders on GPU 0.
+The checkpoint, precision and saved normalization are unchanged.
+
+- 18 unit/placement tests passed, 2 standard opt-in tests skipped. The earlier
+  explicit processor and simulator integrations remain separate passing evidence.
+- Camera hashes match across EGL device placement; renderer costs about 727 MiB.
+- First real prediction: 0.561 s. Full `(1,50,7)` chunk and executed first action
+  were bitwise equal with unused heads on CPU versus temporarily on GPU 0.
+- One complete episode: success, return 1.0, 78 steps, eight chunk predictions,
+  seed 0. Gate used saved initial state 0; episode used saved initial state 1.
+- Mean/median chunk latency: 0.292/0.289 s. Episode sampled peak total GPU 1/GPU 0
+  memory: 9,035/1,288 MiB. PyTorch GPU 1 peak allocated/reserved: 8.063/8.473 GiB.
+- All trajectory rows and all 79 dual-camera video frames were validated.
+
+Local raw evidence is ignored by Git at `outputs/ucl_pi05_cpu_heads_2026-10-30/`
+and `outputs/ucl_placement_2026-10-30/`. This is one real feasibility result,
+not a multi-seed success-rate estimate or shared-autonomy result.
+
+## Initial UCL workstation verification - 30 October 2026
+
+See [ucl_workstation_setup.md](ucl_workstation_setup.md) for the environment,
+commands, pinned revisions, measured memory and offloading investigation.
+
+- Python 3.12, CUDA PyTorch 2.10.0+cu126, exact LeRobot source pin verified;
+  package consistency and small GPU FP32/BF16 checks passed.
+- Unit suite: 13 passed / 2 skipped. Each opt-in integration passed explicitly.
+- LIBERO Spatial task 0 passed NVIDIA EGL dual-camera/action smoke checks.
+- Five-step mock rollout, seed 123: state/action JSONL, metrics and decoded
+  512x256 video verified; success 0.0 and return 0.0 are mock-only evidence.
+- The v044 checkpoint was downloaded to persistent user storage and all LFS
+  hashes were verified against the pinned revision.
+- Strict pretrained weight loading succeeded. CUDA OOM occurred transferring
+  the first observation, before prediction or any evaluated environment step.
+  There is no real-policy success score, latency, trajectory or video.
+- Peak PyTorch allocated/reserved memory: 9,356,805,120 / 9,594,470,400 bytes.
+  Sampled total physical GPU memory peaked at 9,874 MiB, including rendering.
+  GPU use returned to 49 MiB after process exit.
+
+Local evidence (intentionally ignored by Git):
+
+- `outputs/ucl_setup_2026-10-30/`: dependency lock/logs, tests, preflight,
+  checkpoint identity/integrity, shape audit, real-attempt traceback and GPU
+  samples/summary, plus CPU primitive probe.
+- `outputs/ucl_mock_spatial_task0_2026-10-30/`: successful mock pipeline artifacts.
+- `outputs/ucl_pi05_spatial_task0_first_2026-10-30/`: failed real attempt's GPU
+  memory record and empty trajectory/episode files. Empty files are not a
+  rollout result. No metrics or video were produced.
 
 ## Curated, versioned experiment
 

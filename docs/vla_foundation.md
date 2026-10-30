@@ -1,5 +1,12 @@
 # VLA foundation: LIBERO and LeRobot
 
+**UCL deployment update, 30 October 2026:** real pretrained inference and one
+successful 78-step task-0 episode are verified. CPU-resident unused heads and
+EGL separation solved the initial full-GPU OOM. See
+[pi05_memory_placement.md](pi05_memory_placement.md) for numerical-consistency
+tests, exact placement and evidence. The Lenovo-specific observations below
+are historical.
+
 This branch adds the thesis integration under thesis_vla/. The existing MuJoCo
 hover pilot remains independent prior work. Its seven joint targets plus
 gripper distance are not interchangeable with LIBERO's seven-dimensional

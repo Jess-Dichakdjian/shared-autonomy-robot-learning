@@ -59,8 +59,27 @@ class LiberoVectorAdapter:
         return value
 
     def reset(self, *, seed=None, options=None):
+        options = dict(options or {})
+        state_index = options.pop("saved_init_state_index", None)
+        state_metadata = {}
+        if state_index is not None:
+            import hashlib
+            single = self.env.envs[0].unwrapped
+            states = single._init_states
+            if states is None or not 0 <= state_index < len(states):
+                raise ValueError("Saved initial-state index out of range")
+            single.init_state_id = state_index
+            state = np.asarray(states[state_index])
+            state_metadata = {"saved_init_state_index": state_index,
+                              "saved_init_state_sha256": hashlib.sha256(state.tobytes()).hexdigest(),
+                              "saved_init_state_count": len(states)}
         obs, info = self.env.reset(seed=seed, options=options)
-        return self._first(obs), self._first(info)
+        info = self._first(info)
+        info.update(state_metadata)
+        if state_metadata:
+            info["initial_camera_sha256"] = {k: hashlib.sha256(np.asarray(v).tobytes()).hexdigest()
+                for k, v in obs.get("pixels", {}).items()}
+        return self._first(obs), info
 
     def step(self, action):
         obs, reward, term, trunc, info = self.env.step(self.validate_action(action)[None, :])

@@ -12,10 +12,21 @@ LIBERO Spatial task 0
   -> LIBERO simulation
   -> trajectory, metrics, configuration, seed and video logging
 
-The verified path currently substitutes a mock policy for learned inference.
+The path supports both mock policies and real pretrained inference. The first
+successful full pretrained episode was verified on UCL on 30 October 2026:
+EGL runs on GPU 0, active inference on GPU 1, and the unused vocabulary heads
+remain in CPU RAM. Guarded placement preserves all weights and precision; the
+original image function receives an explicit active-parameter device. See
+pi05_memory_placement.md for bitwise consistency tests and measured results.
 The real LeRobot pi0.5 tokenizer and preprocessors/postprocessors have been
 exercised against synthetic LIBERO observations, but pretrained policy weights
 have not been loaded on the Lenovo.
+
+The initial 30 October 2026 UCL CUDA/EGL attempt strictly loaded the pinned
+pretrained weights, then exhausted GPU memory transferring the first real
+LIBERO observation before prediction. The subsequent CPU-head placement solved
+that memory blocker without changing the action computation. Both attempts
+remain separately documented.
 
 ## Observation and action contract
 
