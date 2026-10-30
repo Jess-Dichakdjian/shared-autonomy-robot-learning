@@ -6,7 +6,28 @@
 
 This index distinguishes the current simulation and processor evidence from the separately reported historical pretrained-model run.
 
-## UCL workstation verification - 30 October 2026
+## Real pretrained UCL result - 30 October 2026
+
+See [pi05_memory_placement.md](pi05_memory_placement.md). Unused vocabulary
+heads remain in RAM, active inference runs on GPU 1, and EGL renders on GPU 0.
+The checkpoint, precision and saved normalization are unchanged.
+
+- 18 unit/placement tests passed, 2 standard opt-in tests skipped. The earlier
+  explicit processor and simulator integrations remain separate passing evidence.
+- Camera hashes match across EGL device placement; renderer costs about 727 MiB.
+- First real prediction: 0.561 s. Full `(1,50,7)` chunk and executed first action
+  were bitwise equal with unused heads on CPU versus temporarily on GPU 0.
+- One complete episode: success, return 1.0, 78 steps, eight chunk predictions,
+  seed 0. Gate used saved initial state 0; episode used saved initial state 1.
+- Mean/median chunk latency: 0.292/0.289 s. Episode sampled peak total GPU 1/GPU 0
+  memory: 9,035/1,288 MiB. PyTorch GPU 1 peak allocated/reserved: 8.063/8.473 GiB.
+- All trajectory rows and all 79 dual-camera video frames were validated.
+
+Local raw evidence is ignored by Git at `outputs/ucl_pi05_cpu_heads_2026-10-30/`
+and `outputs/ucl_placement_2026-10-30/`. This is one real feasibility result,
+not a multi-seed success-rate estimate or shared-autonomy result.
+
+## Initial UCL workstation verification - 30 October 2026
 
 See [ucl_workstation_setup.md](ucl_workstation_setup.md) for the environment,
 commands, pinned revisions, measured memory and offloading investigation.

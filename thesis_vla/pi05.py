@@ -29,7 +29,7 @@ class Pi05PolicyAdapter:
 
     @classmethod
     def from_pretrained(cls, checkpoint, *, task, execute_steps=10, local_files_only=True,
-                        env_config=None, device=None, dtype=None):
+                        env_config=None, device=None, dtype=None, cpu_output_heads=False):
         """Load a local checkpoint on demand; never download weights by default."""
         if local_files_only and not Path(checkpoint).exists():
             raise FileNotFoundError(f"local checkpoint does not exist: {checkpoint}")
@@ -58,7 +58,11 @@ class Pi05PolicyAdapter:
         policy.load_state_dict(converted, strict=True)
         del converted, state
         policy.eval()
-        if device is not None:
+        if cpu_output_heads:
+            from thesis_vla.placement import place_action_policy
+            policy.placement_report = place_action_policy(policy, device)
+            policy.config.device = device
+        elif device is not None:
             policy.to(device=device)
             policy.config.device = device
         return cls.from_lerobot_policy(
@@ -106,6 +110,7 @@ class Pi05PolicyAdapter:
                 raise ValueError(f"expected chunk shape (1, T, 7), got {raw.shape}")
             if raw.shape[1] == 0 or not np.isfinite(raw).all():
                 raise ValueError("policy returned empty or non-finite actions")
+            self.last_predicted_chunk = raw.astype(np.float32, copy=True)
             processed = self.postprocess_action(prediction)
             processed = processed.detach().cpu().numpy() if hasattr(processed, "detach") else np.asarray(processed)
             if processed.shape != raw.shape:

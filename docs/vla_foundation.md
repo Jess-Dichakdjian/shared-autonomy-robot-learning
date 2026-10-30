@@ -1,10 +1,11 @@
 # VLA foundation: LIBERO and LeRobot
 
-**UCL deployment update, 30 October 2026:** the workstation is configured and
-CUDA/EGL/mock-validated. Pinned checkpoint hashes match, and strict weight
-loading succeeded, but first-observation CUDA transfer exhausted the 10 GiB
-GPU before prediction. See [ucl_workstation_setup.md](ucl_workstation_setup.md)
-for current results. The Lenovo-specific observations below are historical.
+**UCL deployment update, 30 October 2026:** real pretrained inference and one
+successful 78-step task-0 episode are verified. CPU-resident unused heads and
+EGL separation solved the initial full-GPU OOM. See
+[pi05_memory_placement.md](pi05_memory_placement.md) for numerical-consistency
+tests, exact placement and evidence. The Lenovo-specific observations below
+are historical.
 
 This branch adds the thesis integration under thesis_vla/. The existing MuJoCo
 hover pilot remains independent prior work. Its seven joint targets plus

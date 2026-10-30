@@ -39,6 +39,8 @@ def main():
     parser.add_argument("--dtype", choices=("auto", "bfloat16", "float32"), default="auto")
     parser.add_argument("--output", type=Path, default=Path("outputs/pi05_libero"))
     parser.add_argument("--gl", choices=("osmesa", "egl", "glfw"), default="osmesa")
+    parser.add_argument("--cpu-output-heads", action="store_true", help="retain unused vocabulary heads in CPU RAM with call guards")
+    parser.add_argument("--prediction-gate", action="store_true", help="verify a real prediction and exact agreement with heads on the other GPU before evaluating")
     args = parser.parse_args()
 
     if not args.checkpoint.is_dir():
@@ -46,9 +48,11 @@ def main():
     if args.device.startswith("cuda") and not torch.cuda.is_available():
         raise RuntimeError("CUDA was requested but torch.cuda.is_available() is false on this host.")
     cuda_device = _resolve_cuda_device(args.device)
+    monitored_devices = list(range(torch.cuda.device_count())) if cuda_device is not None else []
     if cuda_device is not None:
         torch.cuda.set_device(cuda_device)
-        torch.cuda.reset_peak_memory_stats(cuda_device)
+        for index in monitored_devices:
+            torch.cuda.reset_peak_memory_stats(index)
     args.output.mkdir(parents=True, exist_ok=True)
 
     repo_root = Path(__file__).resolve().parents[1]
@@ -71,6 +75,7 @@ def main():
             args.checkpoint, task=task, env_config=config,
             execute_steps=args.execute_steps, local_files_only=True, device=args.device,
             dtype=None if args.dtype == "auto" else getattr(torch, args.dtype),
+            cpu_output_heads=args.cpu_output_heads,
         )
         policy_load_seconds = time.perf_counter() - load_started
         load_peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
@@ -94,8 +99,20 @@ def main():
             "gpu_name": torch.cuda.get_device_name(cuda_device) if cuda_device is not None else None,
             "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
             "torch_cuda_version": torch.version.cuda,
+            "egl_device_id": os.environ.get("MUJOCO_EGL_DEVICE_ID"),
+            "placement": getattr(policy.policy, "placement_report", {"mode": "whole_policy"}),
+            "prediction_gate_extra_resets": int(args.prediction_gate),
         }
         (args.output / "run_config.json").write_text(json.dumps(run_config, indent=2) + "\n")
+        if args.prediction_gate:
+            if not args.cpu_output_heads or cuda_device is None or len(monitored_devices) != 2:
+                raise ValueError("Prediction gate requires CPU output heads and exactly two visible CUDA GPUs")
+            from thesis_vla.placement import verify_prediction_gate
+            observation, _ = env.reset(seed=args.seed)
+            gate = verify_prediction_gate(policy, observation, seed=args.seed,
+                                          reference_head_device=f"cuda:{1 - cuda_device.index}")
+            (args.output / "prediction_gate.json").write_text(json.dumps(gate, indent=2) + "\n")
+            print("PREDICTION_GATE_PASSED " + json.dumps({k: v for k, v in gate.items() if k != "predicted_chunk"}), flush=True)
         result = run_evaluation(
             env, policy, args.output, episodes=args.episodes, base_seed=args.seed,
             task=task, configuration=run_config, max_steps=args.max_steps, record_video=True,
@@ -109,6 +126,10 @@ def main():
                 "peak_allocated_bytes": torch.cuda.max_memory_allocated(cuda_device),
                 "peak_reserved_bytes": torch.cuda.max_memory_reserved(cuda_device),
                 "completed": sys.exc_info()[0] is None,
+                "all_visible_devices": {str(index): {
+                    "peak_allocated_bytes": torch.cuda.max_memory_allocated(index),
+                    "peak_reserved_bytes": torch.cuda.max_memory_reserved(index),
+                } for index in monitored_devices},
                 "note": "PyTorch allocator peaks; external GPU usage requires nvidia-smi monitoring",
             }
             (args.output / "gpu_memory.json").write_text(json.dumps(memory, indent=2) + "\n")

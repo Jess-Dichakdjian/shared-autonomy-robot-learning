@@ -1,5 +1,11 @@
 # UCL workstation evaluation setup
 
+**Current result:** real pretrained inference and a successful 78-step episode
+are now verified using CPU-resident unused heads and separated EGL rendering.
+See [pi05_memory_placement.md](pi05_memory_placement.md) for the current protocol,
+18 passing tests, measured memory and numerical-consistency evidence. The
+initial setup and full-GPU failure below are retained as historical evidence.
+
 Host: `LX00060258`, user `jessica`, inspected 30 October 2026.
 Canonical checkout: `/home/jessica/projects/shared-autonomy-robot-learning`.
 

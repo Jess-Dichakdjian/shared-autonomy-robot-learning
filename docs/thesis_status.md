@@ -6,15 +6,15 @@
 
 ## Current status
 
-The UCL workstation now has a validated CUDA/EGL environment and the pinned,
-hash-verified checkpoint. Strict pretrained weight loading succeeded on GPU 1
-(RTX 3080, 10 GiB), but the first observation transfer ran out of VRAM before
-an action prediction. No real-policy episode or inference latency is established.
-The process exited and GPU memory was released. See ucl_workstation_setup.md
-for the measured memory peaks and deployment alternatives.
+Real pretrained inference and one successful LIBERO-Spatial task-0 episode are
+verified on UCL. The pinned, hash-verified checkpoint runs with EGL on GPU 0,
+active inference on GPU 1, and unused vocabulary output heads retained in RAM.
+Checkpoint weights, mixed precision and normalization are unchanged. A full
+action chunk passed a bitwise consistency gate before the successful 78-step
+episode. See pi05_memory_placement.md for commands and measured evidence.
 
 The previous Lenovo RAM limitation remains separate historical context.
-Current UCL checks: 13 unit tests passed, two opt-in integrations passed
+Current UCL checks: 18 unit/placement tests passed, two opt-in integrations passed
 separately, CUDA FP32/BF16 and EGL smoke passed, and a five-step mock rollout
 produced verified trajectory, metrics and video artifacts.
 
@@ -22,13 +22,13 @@ produced verified trajectory, metrics and video artifacts.
 
 | Area | Verified evidence | Limits |
 |---|---|---|
-| LIBERO | Spatial task 0 reset, OSMesa rendering, two 256x256 cameras and a seven-value relative OSC step | Simulation integration only |
-| Observation contract | Two HWC uint8 camera inputs, LeRobot image processors, eight-value state and tokenized instruction | Processor integration used mock policy inference |
-| Policy bridge | LeRobot 0.6.2 pi0.5 processors, action postprocessing, chunk queue/reset and seven-value action validation | Actual weight-backed policy was not loaded on Lenovo |
-| Evaluator | Seeded episodes, action/state/config JSONL, metrics and synchronized camera video | Only a short mock rollout is recorded |
+| LIBERO | Spatial task 0 EGL rendering, two 256x256 cameras and relative OSC actions during a complete episode | One task/episode only |
+| Observation contract | Eight-value state, two cameras plus checkpoint empty camera, saved tokenization/normalization; device shim preserves original pixels/masks bitwise | Tested pinned configuration only |
+| Policy bridge | Real predictions, strict loading, CPU head placement guards and full-chunk numerical consistency | Original all-on-one-GPU forward cannot fit for direct reference |
+| Evaluator | Successful 78-step episode, state/action/config JSONL, metrics, chunk latency, memory and synchronized video | Seed 0; gate state 0 and episode saved initial state 1 |
 | Mock result | LIBERO Spatial task 0, seed 123, three steps, OSMesa, mock zero-action policy; output copied to experiments/libero_mock_policy_smoke_2026-10-17/ | Intentionally capped; success 0.0, return 0.0; not a full episode or learned result |
-| Tests | UCL default suite 13 passed / 2 skipped; LIBERO EGL and authenticated processor integrations each passed explicitly | No real pretrained prediction established |
-| UCL checkpoint preparation | Pinned v044 files cached outside Git and SHA-256 verified; strict CPU load and GPU transfer succeeded | First observation exhausted VRAM before prediction; peak allocated 8.71 GiB, reserved 8.94 GiB, sampled total GPU 9,874 MiB |
+| Tests | UCL default suite 18 passed / 2 skipped; earlier EGL and authenticated processor integrations each passed explicitly | No multi-seed benchmark |
+| UCL real pretrained result | Success, return 1.0, 78 steps; first prediction 0.561 s; mean chunk latency 0.292 s; sampled episode GPU 1 peak 9,035 MiB | One feasibility result; initial full-GPU OOM remains historical evidence |
 
 ## Lenovo CPU feasibility
 
@@ -55,19 +55,16 @@ or human-intervention results. See docs/hover-pilot-results.md.
 
 ## Not implemented or not established
 
-- A real pretrained pi0.5 action on a LIBERO observation.
-- Full-episode or multi-seed learned-policy success rates.
+- Multi-seed learned-policy success rates and final thesis benchmarks.
 - GP uncertainty estimates or uncertainty-triggered intervention.
 - XR interface, human correction collection or learning from corrections.
 - Fine-tuning or policy improvement from corrective demonstrations.
 
 ## Next steps
 
-1. Establish a memory-feasible deployment of the same checkpoint: investigate
-   CPU offloading with validated device handling, or a GPU with more memory.
-   Then run one complete LIBERO Spatial task 0 episode and inspect latency,
-   memory, metrics and video. Full CPU inference is another untested option.
-2. If that run is stable, expand the real-policy baseline to reproducible seeds
-   and report uncertainty intervals and failure cases.
+1. Preserve the verified deployment and define an explicit evaluation protocol
+   covering seeds, saved initial states and the prediction gate's extra reset.
+2. Expand the real-policy baseline only as separately authorized, reporting
+   uncertainty intervals and failure cases over multiple episodes.
 3. Only after establishing the learned baseline, implement and evaluate the
    uncertainty/intervention/correction stages.
