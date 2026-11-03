@@ -95,3 +95,102 @@ models.joblib, predictions.npz, validation_predicted_vs_target.png,
 validation_standardized_residuals.png and, for the final run, equivalent
 final-test plots. Do not describe synthetic fixture results as actual VLA
 experimental results.
+
+## Offline inference API
+
+The data flow at an eligible policy prediction boundary is:
+
+```text
+π0.5 observation
+  -> saved processor produces checkpoint-normalized observation.state (8 values)
+  -> GPInference.predict(state)
+  -> (mean, predictive_std), each with 7 raw checkpoint-normalized action values
+```
+
+The evaluator-facing contract is NumPy-only:
+
+```python
+from thesis_vla.gp import GPInference
+
+predictor = GPInference.load("outputs/gp_final/models.joblib")
+mean, std = predictor.predict(normalized_state)       # each shape (7,)
+means, stds = predictor.predict(normalized_state_batch)  # each shape (N, 7)
+```
+
+The loader accepts the pipeline's models.joblib bundle or a directly serialized
+IndependentGaussianProcess. It restores the fitted input and target scalers with
+the seven scalar models. Incompatible artifacts, absent files, invalid shapes
+and non-finite states raise explicit errors. Keep model artifacts trusted:
+joblib uses Python pickle internally and must not load files from untrusted
+sources.
+
+Call this interface only when the VLA has a fresh chunk prediction, using the
+same checkpoint-normalized eight-value state that produced the π0.5 observation
+state. Do not call it for each queued chunk action as if those actions were new
+observations. The interface reports a diagnostic prediction alongside the VLA
+path; it does not modify policy actions or evaluator behavior.
+
+Returned standard deviations are in raw checkpoint-normalized Y units. Their
+variance is conditional on the fitted kernel hyperparameters and equals latent
+GP posterior variance plus the configured fixed homoscedastic observation-noise
+variance after target inverse-scaling. It does not integrate kernel
+hyperparameter uncertainty and is not automatically calibrated uncertainty,
+failure probability or intervention utility.
+
+## Methodology review and current limits
+
+The split and train-only scaling avoid within-episode sample leakage. This does
+not make chunk starts independent: the UCL batch has 161 pairs from 20 episodes,
+one task and a single policy/checkpoint setup. The robot state omits the visual
+scene and language that condition π0.5, so state-only inputs can be aliased.
+All 20 recorded episodes succeeded; this dataset has no failed episodes with
+which to test whether GP spread distinguishes failures. Real validation can
+assess held-out action prediction and interval coverage, but cannot support a
+failure-probability interpretation from this batch.
+
+The configured noise variance is fixed at 1e-4 in training-standardized target
+units. It is a documented initial Gaussian noise assumption, not measured
+sensor noise or a calibrated quantity. Optimizer restarts default to zero, so
+the marginal-likelihood optimizer uses one initialization and can reach a local
+optimum. Bounds warnings are surfaced during fitting; the optimized kernels are
+saved in experiment metadata. Review warnings and fitted parameters on the real
+episode split before interpreting metrics or changing bounds/noise.
+
+## Minimal synthetic inference example
+
+Run from the repository root. This fits only a deterministic test fixture; it
+does not read the UCL dataset and is not a thesis result.
+
+```bash
+source ~/.venvs/shared-autonomy-robot-learning-gp/bin/activate
+PYTHONPATH=.:tests python - <<'PY'
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import joblib
+
+from gp_synthetic_fixture import write_synthetic_gp_npz
+from thesis_vla.gp import (
+    GPInference, IndependentGaussianProcess, load_gp_dataset,
+    measure_cpu_prediction_latency, split_by_episode,
+)
+
+with TemporaryDirectory() as directory:
+    root = Path(directory)
+    fixture = write_synthetic_gp_npz(root / "synthetic.npz")
+    data = load_gp_dataset(fixture)
+    split = split_by_episode(data.episode_id, seed=17)
+    fitted = IndependentGaussianProcess(seed=17).fit(data.X[split.train], data.Y[split.train])
+    artifact = root / "models.joblib"
+    joblib.dump({"gp": fitted}, artifact)
+    predictor = GPInference.load(artifact)
+    mean, std = predictor.predict(data.X[split.validation][0])
+    print(mean.shape, std.shape)  # (7,), (7,)
+    print(measure_cpu_prediction_latency(predictor, data.X[split.validation][0]))
+PY
+```
+
+Run the interface and baseline tests:
+
+```bash
+PYTHONPATH=.:tests python -m pytest -q tests/test_gp_baseline.py tests/test_gp_inference.py
+```

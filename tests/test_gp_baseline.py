@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 from gp_synthetic_fixture import write_synthetic_gp_npz
 from thesis_vla.gp.data import load_gp_dataset
+from thesis_vla.gp.inference import GPInference
 from thesis_vla.gp.metrics import regression_metrics
 from thesis_vla.gp.model import IndependentGaussianProcess, RidgeBaseline
 from thesis_vla.gp.pipeline import run_gp_experiment
@@ -125,6 +126,10 @@ def test_pipeline_exports_validation_without_touching_test(tmp_path):
     validation_ids = result["splits"]["episode_ids"]["validation"]
     validation_mask = np.isin(data.episode_id, validation_ids)
     restored_mean, restored_std = saved["gp"].predict(data.X[validation_mask])
+    pipeline_predictor = GPInference.load(out / "models.joblib")
+    pipeline_mean, pipeline_std = pipeline_predictor.predict(data.X[validation_mask])
+    np.testing.assert_allclose(pipeline_mean, restored_mean)
+    np.testing.assert_allclose(pipeline_std, restored_std)
     with np.load(out / "predictions.npz", allow_pickle=False) as pred:
         np.testing.assert_allclose(restored_mean, pred["validation_gp_mean"])
         np.testing.assert_allclose(restored_std, pred["validation_gp_predictive_std"])
