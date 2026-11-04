@@ -1,6 +1,7 @@
 """Single-GPU BEAST wrapper around the validated resumable LIBERO benchmark."""
 import argparse
 import importlib.metadata
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", type=Path, default=Path.home() / ".cache/huggingface/hub/models--lerobot--pi05_libero_finetuned_v044/snapshots/7152f13e34c6c115d808aea0e5d08aca74eac14b")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--suite", default="libero_spatial")
+    parser.add_argument("--task-id", type=int, default=0)
     parser.add_argument("--total", type=int, default=20)
     parser.add_argument("--pilot", type=int, default=5)
     parser.add_argument("--base-seed", type=int, default=0)
@@ -22,6 +25,14 @@ def main():
     parser.add_argument("--gp-model", type=Path, help="Optional trained GP models.joblib for passive CPU monitoring")
     parser.add_argument("--gp-python", type=Path, default=Path.home() / ".venvs/shared-autonomy-robot-learning-gp-beast/bin/python",
                         help="Python executable for the isolated CPU-only GP environment")
+    parser.add_argument("--monitor-mode", choices=("autonomy_only", "passive_monitoring", "gp_uncertainty",
+                        "gp_vla_disagreement", "state_distance", "random_matched_budget"),
+                        default="passive_monitoring")
+    parser.add_argument("--monitor-threshold-config", type=Path,
+                        help="Validation-frozen configs/gp_uncertainty_selected_model.json")
+    parser.add_argument("--random-budget", type=int, default=1,
+                        help="Fixed request budget for random_matched_budget over 28 possible chunks")
+    parser.add_argument("--random-seed", type=int, default=20261104)
     args = parser.parse_args()
     if not 1 <= args.pilot <= args.total <= 20 or args.base_seed < 0 or args.first_state < 0:
         raise ValueError("Require 1 <= pilot <= total <= 20 and non-negative seed/state")
@@ -64,11 +75,33 @@ def main():
     from thesis_vla.placement import verify_single_gpu_action_contract, verify_single_gpu_placement
 
     passive_gp = None
+    monitoring_thresholds = {}
+    random_schedule = None
+    if args.monitor_mode not in {"autonomy_only", "passive_monitoring"} and args.monitor_mode != "random_matched_budget":
+        if args.monitor_threshold_config is None:
+            raise ValueError("Signal-trigger modes require validation-frozen --monitor-threshold-config")
+    if args.monitor_threshold_config is not None:
+        threshold_config = json.loads(args.monitor_threshold_config.expanduser().read_text(encoding="utf-8"))
+        raw_thresholds = threshold_config["request_thresholds_from_validation_only"]
+        monitoring_thresholds = {
+            "gp_uncertainty": raw_thresholds["gp_uncertainty_standardized_rms_90th"],
+            "gp_vla_disagreement": raw_thresholds["gp_vla_disagreement_standardized_rms_90th"],
+            "state_distance": raw_thresholds["nearest_training_state_distance_90th"],
+        }
+    if args.monitor_mode == "random_matched_budget":
+        from thesis_vla.gp.monitoring import random_matched_schedule
+        def random_schedule(episode_id):
+            digest = hashlib.sha256(str(episode_id).encode("utf-8")).digest()
+            episode_seed = int.from_bytes(digest[:4], "big")
+            return random_matched_schedule(max_boundaries=28, budget=args.random_budget,
+                                           seed=(args.random_seed + episode_seed) % (2**32))
     if args.gp_model is not None:
         from thesis_vla.gp.client import GPInferenceClient
         passive_gp = GPInferenceClient(args.gp_model, python_executable=args.gp_python)
+    if args.monitor_mode not in {"autonomy_only", "passive_monitoring"} and passive_gp is None:
+        raise ValueError("Triggered assistance requests require --gp-model")
 
-    config = LiberoTaskConfig(suite="libero_spatial", task_id=0)
+    config = LiberoTaskConfig(suite=args.suite, task_id=args.task_id)
     task = str(get_benchmark_dict()[config.suite]().get_task(config.task_id).language)
     env = LiberoVectorAdapter(create_vector_env(config, gl="osmesa"))
     session = args.output / "sessions" / str(time.time_ns())
@@ -82,7 +115,8 @@ def main():
             checkpoint, task=task, env_config=config, execute_steps=10,
             local_files_only=True, device="cuda:0", dtype=None, cpu_output_heads=True,
             meta_init=True, verify_placement_integrity=True, expected_weights_sha256=expected_sha,
-            passive_gp=passive_gp,
+            passive_gp=passive_gp, monitoring_mode=args.monitor_mode,
+            monitoring_thresholds=monitoring_thresholds, random_schedule=random_schedule,
         )
         identity = {
             "suite": config.suite, "task_id": config.task_id, "fps": config.fps,
@@ -105,6 +139,14 @@ def main():
                 "thesis_vla/evaluation.py", "thesis_vla/pi05.py", "thesis_vla/placement.py",
                 "thesis_vla/libero.py", "thesis_vla/dataset.py",
                 "thesis_vla/gp/client.py", "scripts/gp_inference_worker.py")},
+            "assistance_monitor": {
+                "mode": args.monitor_mode,
+                "thresholds": monitoring_thresholds,
+                "random_budget": args.random_budget if args.monitor_mode == "random_matched_budget" else None,
+                "random_seed": args.random_seed if args.monitor_mode == "random_matched_budget" else None,
+                "request_only": True,
+                "action_effect": "none; no correction provider was used",
+            },
             "passive_gp_monitor": {
                 "enabled": passive_gp is not None,
                 "model_path": str(args.gp_model.expanduser().resolve()) if args.gp_model else None,

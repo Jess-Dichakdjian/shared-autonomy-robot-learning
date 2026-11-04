@@ -15,6 +15,7 @@ class ActionProposal:
     chunk_index: int
     is_chunk_start: bool
     passive_gp_prediction: dict | None = None
+    assistance_request: dict | None = None
 
     @property
     def action(self):
@@ -22,7 +23,9 @@ class ActionProposal:
 
 class Pi05PolicyAdapter:
     """Bridge batched LeRobot inference to LIBERO's seven-dimensional action."""
-    def __init__(self, policy, prepare_batch, postprocess_action=lambda x: x, *, task, execute_steps=10, passive_gp=None):
+    def __init__(self, policy, prepare_batch, postprocess_action=lambda x: x, *, task, execute_steps=10,
+                 passive_gp=None, monitoring_mode="passive_monitoring", monitoring_thresholds=None,
+                 random_schedule=None):
         if execute_steps < 1:
             raise ValueError("execute_steps must be positive")
         self.policy, self.prepare_batch = policy, prepare_batch
@@ -31,13 +34,19 @@ class Pi05PolicyAdapter:
         self._queue = deque()
         self._chunk_id = self._chunk_index = 0
         self.passive_gp = passive_gp
+        self.monitoring_mode = monitoring_mode
+        self.monitoring_thresholds = dict(monitoring_thresholds or {})
+        self.random_schedule = random_schedule
+        self._boundary_index = 0
         self._chunk_passive_gp_prediction = None
+        self._chunk_assistance_request = None
 
     @classmethod
     def from_pretrained(cls, checkpoint, *, task, execute_steps=10, local_files_only=True,
                         env_config=None, device=None, dtype=None, cpu_output_heads=False,
                         meta_init=False, verify_placement_integrity=False, expected_weights_sha256=None,
-                        passive_gp=None):
+                        passive_gp=None, monitoring_mode="passive_monitoring",
+                        monitoring_thresholds=None, random_schedule=None):
         """Load a local checkpoint on demand; never download weights by default."""
         if local_files_only and not Path(checkpoint).exists():
             raise FileNotFoundError(f"local checkpoint does not exist: {checkpoint}")
@@ -97,11 +106,14 @@ class Pi05PolicyAdapter:
         return cls.from_lerobot_policy(
             policy, task=task, execute_steps=execute_steps, env_config=env_config,
             pretrained_path=checkpoint, passive_gp=passive_gp,
+            monitoring_mode=monitoring_mode, monitoring_thresholds=monitoring_thresholds,
+            random_schedule=random_schedule,
         )
 
     @classmethod
     def from_lerobot_policy(cls, policy, *, task, execute_steps=10, env_config=None,
-                            pretrained_path=None, passive_gp=None):
+                            pretrained_path=None, passive_gp=None, monitoring_mode="passive_monitoring",
+                            monitoring_thresholds=None, random_schedule=None):
         """Wire an existing LeRobot π0.5 policy to the LIBERO evaluator.
 
         This constructor permits processor/contract tests with a mock inference
@@ -134,7 +146,8 @@ class Pi05PolicyAdapter:
             return _process_chunk(chunk, policy_postprocessor, env_postprocessor, ACTION)
 
         adapter = cls(policy, prepare, process_action, task=task, execute_steps=execute_steps,
-                      passive_gp=passive_gp)
+                      passive_gp=passive_gp, monitoring_mode=monitoring_mode,
+                      monitoring_thresholds=monitoring_thresholds, random_schedule=random_schedule)
         adapter.prediction_state_capture = state_capture
         return adapter
 
@@ -149,6 +162,9 @@ class Pi05PolicyAdapter:
                 raise ValueError("policy returned empty or non-finite actions")
             self.last_predicted_chunk = raw.astype(np.float32, copy=True)
             self._chunk_passive_gp_prediction = None
+            self._chunk_assistance_request = None
+            boundary_index = self._boundary_index
+            self._boundary_index += 1
             if self.passive_gp is not None:
                 state = getattr(self, "prediction_state_capture", {}).get("vla_normalized")
                 state = np.asarray(state, dtype=np.float64) if state is not None else None
@@ -171,6 +187,27 @@ class Pi05PolicyAdapter:
                     "worker_prediction_seconds": getattr(self.passive_gp, "last_worker_prediction_seconds", None),
                     "worker_round_trip_seconds": getattr(self.passive_gp, "last_round_trip_seconds", round_trip_seconds),
                 }
+                if callable(getattr(self.passive_gp, "monitoring_scores", None)):
+                    scores = self.passive_gp.monitoring_scores(state, raw[0, 0], gp_mean, gp_std)
+                    from thesis_vla.gp.monitoring import MonitoringSignals, decide_assistance
+                    signal_values = MonitoringSignals(
+                        float(scores["gp_uncertainty_standardized_rms"]),
+                        float(scores["gp_vla_disagreement_standardized_rms"]),
+                        float(scores["nearest_training_state_distance"]),
+                    )
+                    decision = decide_assistance(
+                        self.monitoring_mode, signal_values, self.monitoring_thresholds,
+                        episode_id=str(getattr(self, "episode_id", "episode")),
+                        boundary_index=boundary_index, is_chunk_boundary=True,
+                        random_schedule=self.random_schedule,
+                    )
+                    self._chunk_passive_gp_prediction["monitoring_scores"] = scores
+                    self._chunk_assistance_request = {
+                        "mode": decision.mode, "requested": decision.requested,
+                        "reason": decision.reason,
+                        "request": (vars(decision.request) if decision.request is not None else None),
+                        "control_effect": "none; request-only monitor",
+                    }
             processed = self.postprocess_action(prediction)
             processed = processed.detach().cpu().numpy() if hasattr(processed, "detach") else np.asarray(processed)
             if processed.shape != raw.shape:
@@ -187,13 +224,16 @@ class Pi05PolicyAdapter:
         self._chunk_index += 1
         predicted, executed = self._queue.popleft()
         return ActionProposal(predicted, executed, self._chunk_id, index, index == 0,
-                              self._chunk_passive_gp_prediction if index == 0 else None)
+                              self._chunk_passive_gp_prediction if index == 0 else None,
+                              self._chunk_assistance_request if index == 0 else None)
 
     def clear_action_queue(self):
         """Discard stale actions and clear policy temporal inference state."""
         self._queue.clear()
         self._chunk_index = 0
         self._chunk_passive_gp_prediction = None
+        self._chunk_assistance_request = None
+        self._boundary_index = 0
         reset = getattr(self.policy, "reset", None)
         if callable(reset):
             reset()

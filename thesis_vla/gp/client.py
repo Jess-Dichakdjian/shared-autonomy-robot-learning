@@ -33,6 +33,20 @@ class GPInferenceClient:
             self.close()
             raise RuntimeError(f"GP inference worker failed to load artifact: {ready.get('error')}")
         self.model_sha256 = ready["model_sha256"]
+        metadata = ready.get("monitoring_metadata")
+        if not isinstance(metadata, dict):
+            self.close()
+            raise RuntimeError("GP worker omitted training-scaler metadata for monitor scoring")
+        self.target_scale = np.asarray(metadata.get("target_scale"), dtype=np.float64)
+        self.input_mean = np.asarray(metadata.get("input_mean"), dtype=np.float64)
+        self.input_scale = np.asarray(metadata.get("input_scale"), dtype=np.float64)
+        self.train_states_scaled = np.asarray(metadata.get("train_states_scaled"), dtype=np.float64)
+        if (self.target_scale.shape != (7,) or self.input_mean.shape != (8,) or
+                self.input_scale.shape != (8,) or self.train_states_scaled.ndim != 2 or
+                self.train_states_scaled.shape[1] != 8 or self.train_states_scaled.shape[0] == 0 or
+                not all(np.isfinite(v).all() for v in (self.target_scale,self.input_mean,self.input_scale,self.train_states_scaled))):
+            self.close()
+            raise RuntimeError("GP worker supplied invalid monitor-scoring metadata")
         self.last_worker_prediction_seconds = None
         self.last_round_trip_seconds = None
 
@@ -59,6 +73,14 @@ class GPInferenceClient:
         self.last_worker_prediction_seconds = float(response["prediction_seconds"])
         self.last_round_trip_seconds = elapsed
         return mean, std
+
+    def monitoring_scores(self, state, vla_action, gp_mean, gp_std):
+        from .monitoring import compute_monitoring_signals
+        return compute_monitoring_signals(
+            state, vla_action, gp_mean, gp_std,
+            target_scale=self.target_scale, input_mean=self.input_mean,
+            input_scale=self.input_scale, train_states_scaled=self.train_states_scaled,
+        ).as_dict()
 
     def close(self):
         process = getattr(self, "_process", None)

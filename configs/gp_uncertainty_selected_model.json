@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "experiment_id": "gp_uncertainty_selective_assistance_heldout_2026-11-04",
+  "source_validation": "outputs/gp_uncertainty_validation_2026-11-04/validation.json",
+  "selected_model": {
+    "kernel": "Matern 5/2 ARD times constant amplitude",
+    "noise_variance_standardized_target_units": 0.01,
+    "n_restarts_optimizer": 2,
+    "length_scale_bounds": [
+      0.01,
+      100
+    ],
+    "amplitude_bounds": [
+      0.01,
+      100
+    ],
+    "seed": 17,
+    "selection_reason": "RMSE within 2% of best validation candidate and 90% interval coverage closest to 0.90 among eligible candidates."
+  },
+  "validation": {
+    "rows": 25,
+    "held_out_episode_groups": [
+      "1:0",
+      "4:0"
+    ],
+    "gp_mae": 0.3743015976346021,
+    "gp_rmse": 0.5547231595520701,
+    "ridge_mae": 0.621271403892833,
+    "ridge_rmse": 0.7834383197155359,
+    "original_coverage_90": 0.92,
+    "original_coverage_95": 0.9428571428571428,
+    "descriptive_calibration_multiplier": 0.9098785355843417,
+    "calibrated_coverage_90": 0.8971428571428571,
+    "calibrated_coverage_95": 0.9314285714285714,
+    "spearman_uncertainty_vs_standardized_action_error": 0.43769230769230766,
+    "spearman_state_novelty_vs_standardized_action_error": 0.32692307692307687,
+    "warning_count_selected_candidate": 14,
+    "length_scales_still_at_bound": true
+  },
+  "request_thresholds_from_validation_only": {
+    "gp_uncertainty_standardized_rms_90th": 0.8421057488361606,
+    "gp_vla_disagreement_standardized_rms_90th": 0.9231169690597748,
+    "nearest_training_state_distance_90th": 1.3743720420975967
+  },
+  "interpretation": {
+    "disagreement": "Surrogate-to-live-VLA action mismatch in normalized Y coordinates; equals observed GP action residual when the target is the same VLA output.",
+    "uncertainty": "Conditional GP predictive spread including fixed observation noise; not VLA epistemic uncertainty or task failure probability.",
+    "threshold_status": "Exploratory request-only thresholds, not validated risk thresholds.",
+    "calibrated_intervals": "Validation multiplier is descriptive; no independent-episode conformal guarantee."
+  },
+  "test_partition_opened": false
+}

@@ -21,7 +21,15 @@ def main():
         from thesis_vla.gp import GPInference
         predictor = GPInference.load(args.model)
         digest = hashlib.sha256(args.model.read_bytes()).hexdigest()
-        print(json.dumps({"ready": True, "model_sha256": digest}), flush=True)
+        gp_model = predictor.model
+        monitoring_metadata = {
+            "target_scale": gp_model.y_scaler.scale_.tolist(),
+            "input_mean": gp_model.x_scaler.mean_.tolist(),
+            "input_scale": gp_model.x_scaler.scale_.tolist(),
+            "train_states_scaled": gp_model.models[0].X_train_.tolist(),
+        }
+        print(json.dumps({"ready": True, "model_sha256": digest,
+                          "monitoring_metadata": monitoring_metadata}), flush=True)
     except Exception as exc:
         print(json.dumps({"ready": False, "error": f"{type(exc).__name__}: {exc}"}), flush=True)
         return 2

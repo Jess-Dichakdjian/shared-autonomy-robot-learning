@@ -1,0 +1,154 @@
+{
+  "schema_version": 1,
+  "experiment_id": "gp_uncertainty_selective_assistance_heldout_2026-11-04",
+  "status": "frozen_before_heldout_rollouts",
+  "policy": {
+    "checkpoint_id": "lerobot/pi05_libero_finetuned_v044",
+    "revision": "7152f13e34c6c115d808aea0e5d08aca74eac14b",
+    "weights_sha256": "877b3ec1130548b69af7f8aeef3ec9d3fc7738040f0b9beb490857ec970997ae",
+    "frozen": true
+  },
+  "split": {
+    "historical_task0_train_episode_ids": [
+      0,
+      1,
+      2,
+      7,
+      8,
+      10,
+      11,
+      12,
+      13,
+      15,
+      18,
+      19
+    ],
+    "pilot_train_augmentation": [
+      {
+        "task_id": 1,
+        "state_index": 1,
+        "seed": 1102
+      },
+      {
+        "task_id": 4,
+        "state_index": 1,
+        "seed": 1102
+      }
+    ],
+    "pilot_validation": [
+      {
+        "task_id": 1,
+        "state_index": 0,
+        "seed": 1101
+      },
+      {
+        "task_id": 4,
+        "state_index": 0,
+        "seed": 1101
+      }
+    ],
+    "test": {
+      "episode_limit_steps": 280,
+      "tasks": [
+        {
+          "suite": "libero_spatial",
+          "task_id": 1,
+          "instruction": "pick up the black bowl next to the ramekin and place it on the plate",
+          "state_indices": [
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "state_sha256": [
+            "d45a8bb759e662331e34b0ade8f7a4ca847993b682d3299aaa4894b340c845a0",
+            "9cdfce0fe3434dc2c261272bc32dd3b56956de7c14e1e6d4c8a76aa7323e0f4d",
+            "97916cb27d2a1b9650016b93bbc33aa2855dfbdd11ded29650da8357c5c418e2",
+            "d0345028d24b7dda175db33c7eb0e5c1d4df2fdf5620c51dd3641fdc77750964",
+            "74548b977713394a062b37d064eb857cc795b1dd9e3dd6f72236514b2f85404c"
+          ],
+          "seeds": [
+            1202,
+            1203,
+            1204,
+            1205,
+            1206
+          ],
+          "output": "outputs/gp_uncertainty_heldout_2026-11-04/libero_spatial_task1"
+        },
+        {
+          "suite": "libero_spatial",
+          "task_id": 4,
+          "instruction": "pick up the black bowl in the top drawer of the wooden cabinet and place it on the plate",
+          "state_indices": [
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "state_sha256": [
+            "d5a2a728be37ce588fd1326df08b48cb9e1913b333c6719bb7059308783d4731",
+            "7e950b4903eb62f247605b60952d62aca17222446e05c299de3d8b615756a2fb",
+            "eacc257cf75be38a89bdf75e5300cded0aee0ec1d0a2ac4b91d4c4cdb11c763b",
+            "b87346216738a7ce42130dcd154c43380035d684b66a383eaa412aa7d7295b7c",
+            "58efbae8fa8cdf03edfa2542dbbda4caf806bdf5268b8320a00f1549b00bec95"
+          ],
+          "seeds": [
+            1202,
+            1203,
+            1204,
+            1205,
+            1206
+          ],
+          "output": "outputs/gp_uncertainty_heldout_2026-11-04/libero_spatial_task4"
+        }
+      ]
+    }
+  },
+  "gp_model_selection": {
+    "kernel": "ARD Matern 5/2 times constant amplitude",
+    "optimizer_restarts": [
+      0,
+      2
+    ],
+    "length_scale_upper_bounds": [
+      100,
+      1000
+    ],
+    "fixed_standardized_observation_noise_variance": [
+      0.0001,
+      0.001,
+      0.01
+    ],
+    "selection_rule": "Minimize pooled validation RMSE over 7 action dimensions; if RMSE differs by less than 2%, choose better validation 90% interval coverage. Record candidate warnings and parameters.",
+    "interval_calibration": "For selected model, descriptive validation-only multiplier q90(abs(residual)/predictive_std)/1.6448536269514722; no split-conformal guarantee because chunk starts within episodes are correlated.",
+    "signals": {
+      "gp_uncertainty": "RMS predictive std / train-fitted target scale across seven outputs.",
+      "gp_vla_disagreement": "RMS (GP mean - actual current pi0.5 horizon-zero action) / train-fitted target scale.",
+      "state_novelty": "Minimum Euclidean distance from current train-scaled 8D state to a training state.",
+      "adverse_outcome": "Episode-level false success, terminal failure, or time limit only."
+    },
+    "threshold_rule": "Use validation 90th percentile of each signal as exploratory request threshold. No control changes or task-risk claim."
+  },
+  "runtime": {
+    "renderer": "osmesa",
+    "camera_names": [
+      "agentview_image",
+      "robot0_eye_in_hand_image"
+    ],
+    "gpu_visibility": "CUDA_VISIBLE_DEVICES=0",
+    "vla_environment": "~/.venvs/shared-autonomy-robot-learning-pi05-beast",
+    "gp_environment": "~/.venvs/shared-autonomy-robot-learning-gp-beast",
+    "monitor": "passive GP sidecar only",
+    "active_assistance": false,
+    "intervention_budget": 0
+  },
+  "analysis_rules": [
+    "Do not alter existing task-0 outputs or historical test.",
+    "Do not inspect held-out outcomes until model, calibration and thresholds are frozen.",
+    "Keep UCL and BEAST data separate.",
+    "Preserve all successes, failures, timeouts and runtime errors."
+  ]
+}

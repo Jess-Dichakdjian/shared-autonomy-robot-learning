@@ -58,6 +58,7 @@ def run_evaluation(env, policy, output_dir: str | Path, *, episodes: int, base_s
             np.random.seed(seed)
             torch.manual_seed(seed)
             policy.reset()
+            policy.episode_id = f"{configuration.get('suite', 'suite')}:{configuration.get('task_id', 'task')}:{seed}"
             observation, reset_info = env.reset(seed=seed)
             frames = [_camera_montage(observation)] if record_video else []
             total_reward, success = 0.0, _success_value(reset_info)
@@ -91,6 +92,7 @@ def run_evaluation(env, policy, output_dir: str | Path, *, episodes: int, base_s
                     "chunk_id": proposal.chunk_id, "chunk_index": proposal.chunk_index,
                     "chunk_start": proposal.is_chunk_start, "inference_seconds": inference_seconds,
                     "passive_gp_prediction": proposal.passive_gp_prediction,
+                    "assistance_request": proposal.assistance_request,
                     "robot_state": _robot_state(observation), "next_robot_state": _robot_state(next_observation),
                     "reward": reward, "terminated": terminated, "truncated": truncated,
                     "success": found_success, "configuration": config_record,

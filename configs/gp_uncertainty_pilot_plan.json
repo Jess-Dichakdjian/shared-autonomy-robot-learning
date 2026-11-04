@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "experiment_id": "gp_uncertainty_selective_assistance_pilot_2026-11-04",
+  "status": "planned_before_policy_rollouts",
+  "purpose": "Feasibility pilot for task-conditioned observation/action contracts and passive GP monitoring on two held-out LIBERO configurations.",
+  "policy": {
+    "checkpoint_id": "lerobot/pi05_libero_finetuned_v044",
+    "revision": "7152f13e34c6c115d808aea0e5d08aca74eac14b",
+    "weights_sha256": "877b3ec1130548b69af7f8aeef3ec9d3fc7738040f0b9beb490857ec970997ae",
+    "frozen": true,
+    "action_chunk": 50,
+    "execute_steps": 10
+  },
+  "environment": {
+    "suite": "libero_spatial",
+    "renderer": "osmesa",
+    "camera_names": ["agentview_image", "robot0_eye_in_hand_image"],
+    "image_shape_per_camera": [256, 256, 3],
+    "control_mode": "relative",
+    "episode_limit_steps": 280,
+    "note": "OSMesa rasterization differs from the UCL EGL benchmark renderer; results remain separately identified as BEAST."
+  },
+  "fixed_tasks": [
+    {
+      "task_id": 1,
+      "instruction": "pick up the black bowl next to the ramekin and place it on the plate",
+      "saved_initial_state_indices": [0, 1],
+      "saved_initial_state_sha256": [
+        "d116842e01703fbea595511db813a3816c8d9f2302b4e979ebec4f15b7a750a2",
+        "b8757ca36fc25bb010af8934ff98b8d3a221cbd3a5e38e7b07cc8055c3108a0b"
+      ],
+      "seeds": [1101, 1102],
+      "output": "outputs/gp_uncertainty_pilot_2026-11-04/libero_spatial_task1"
+    },
+    {
+      "task_id": 4,
+      "instruction": "pick up the black bowl in the top drawer of the wooden cabinet and place it on the plate",
+      "saved_initial_state_indices": [0, 1],
+      "saved_initial_state_sha256": [
+        "2e3f91b350eaef1b23c2d4ee14c513b2158a106bff7ed6c249b58e2cf89367f4",
+        "d1f552d41794709fdcdccf886e4be6384f15a50c1d0e6227a99e08d86e19e23e"
+      ],
+      "seeds": [1101, 1102],
+      "output": "outputs/gp_uncertainty_pilot_2026-11-04/libero_spatial_task4"
+    }
+  ],
+  "monitoring": {
+    "mode": "passive_only",
+    "gp_artifact": "outputs/beast_gp_final_2026-11-04/models.joblib",
+    "action_effect": "none",
+    "trigger_thresholds_enabled": false,
+    "intervention_enabled": false
+  },
+  "analysis_rules": [
+    "Keep the original 20-episode task-0 evidence immutable.",
+    "Do not pool BEAST and UCL results.",
+    "Preserve all successes, failures, timeouts, and runtime errors.",
+    "Do not use pilot outcomes to claim calibration or task-risk discrimination.",
+    "Do not evaluate AUROC if only one independently labeled task-outcome class is observed."
+  ]
+}

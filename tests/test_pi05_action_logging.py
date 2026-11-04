@@ -119,13 +119,19 @@ def test_passive_gp_is_chunk_boundary_only_and_does_not_change_vla_actions():
             self.states.append(np.asarray(state).copy())
             return np.full(7, 99.0), np.full(7, 0.5)
 
-    def make_adapter(passive_gp=None):
+        def monitoring_scores(self, state, action, gp_mean, gp_std):
+            return {"gp_uncertainty_standardized_rms": 0.9,
+                    "gp_vla_disagreement_standardized_rms": 1.1,
+                    "nearest_training_state_distance": 1.5}
+
+    def make_adapter(passive_gp=None, monitoring_mode="passive_monitoring", thresholds=None):
         capture = {}
         def prepare(observation, task):
             capture["vla_normalized"] = np.asarray(observation["state"], dtype=np.float32).copy()
             return {}
         adapter = Pi05PolicyAdapter(ChunkPolicy(), prepare, task="fixture", execute_steps=2,
-                                    passive_gp=passive_gp)
+                                    passive_gp=passive_gp, monitoring_mode=monitoring_mode,
+                                    monitoring_thresholds=thresholds)
         adapter.prediction_state_capture = capture
         return adapter
 
@@ -145,4 +151,13 @@ def test_passive_gp_is_chunk_boundary_only_and_does_not_change_vla_actions():
     assert monitored_proposals[0].passive_gp_prediction["model_sha256"] == "fixture-hash"
     assert monitored_proposals[0].passive_gp_prediction["input_state_vla_normalized"] == observations[0]["state"].tolist()
     assert monitored_proposals[1].passive_gp_prediction is None
+    assert monitored_proposals[0].assistance_request["requested"] is False
+    assert monitored_proposals[0].passive_gp_prediction["monitoring_scores"]["gp_uncertainty_standardized_rms"] == 0.9
     assert monitored_proposals[2].passive_gp_prediction["input_state_vla_normalized"] == observations[2]["state"].tolist()
+
+    triggered = make_adapter(gp, monitoring_mode="gp_uncertainty", thresholds={"gp_uncertainty": 0.9})
+    triggered_proposals = [triggered.act(obs) for obs in observations]
+    assert triggered_proposals[0].assistance_request["requested"] is True
+    for plain, watched in zip(baseline_proposals, triggered_proposals, strict=True):
+        np.testing.assert_array_equal(plain.predicted_action, watched.predicted_action)
+        np.testing.assert_array_equal(plain.executed_action, watched.executed_action)

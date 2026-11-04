@@ -34,7 +34,7 @@ def create_vector_env(config=LiberoTaskConfig(), *, gl="osmesa"):
     if gl not in {"egl", "osmesa", "glfw"}:
         raise ValueError("gl must be egl, osmesa, or glfw")
     os.environ["MUJOCO_GL"] = gl
-    return make_lerobot_env_config(config).create_envs(n_envs=1, use_async_envs=False)[config.suite][0]
+    return make_lerobot_env_config(config).create_envs(n_envs=1, use_async_envs=False)[config.suite][config.task_id]
 
 class LiberoVectorAdapter:
     """Validate seven-dimensional actions and unbatch one-env vector results."""
