@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LIBERO human teleoperation</title>
+<style>
+body{font:15px system-ui,sans-serif;background:#111827;color:#e5e7eb;max-width:1200px;margin:1.2rem auto;padding:0 1rem}
+h1{font-size:1.5rem} .banner{padding:.8rem 1rem;border-radius:.5rem;background:#064e3b;font-weight:700}
+.warn{color:#fbbf24}.grid{display:grid;grid-template-columns:1fr 1fr;gap:.7rem}img{width:100%;background:#000;border-radius:.4rem}section{background:#1f2937;padding:1rem;border-radius:.5rem;margin:.8rem 0}
+button{padding:.55rem .8rem;margin:.2rem;border:0;border-radius:.35rem;background:#2563eb;color:white;font-weight:600;cursor:pointer}button.danger{background:#b91c1c}button:disabled{opacity:.45;cursor:not-allowed}
+.controls{display:grid;grid-template-columns:repeat(3,minmax(65px,100px));gap:.25rem;justify-content:center}.controls button{min-height:42px}
+label{display:block;margin:.7rem 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#030712;padding:.7rem;border-radius:.4rem}
+@media(max-width:700px){.grid{grid-template-columns:1fr}}
+</style>
+<body>
+<h1>LIBERO-Spatial — human control</h1>
+<div id="owner" class="banner">Connecting…</div>
+<section><b>Task:</b> <span id="task"></span><br><span class="warn">No π0.5 policy is loaded; this page is manual simulation control only.</span><br>
+Seed <span id="seed"></span> · saved state <span id="stateIndex"></span> · step <span id="step"></span> · success <span id="success"></span></section>
+<section class="grid"><div><b>Front camera</b><img id="front" alt="Front camera"></div><div><b>Wrist camera</b><img id="wrist" alt="Wrist camera"></div></section>
+<section><h2>Movement (one small command per press)</h2>
+<label>Translation step: <span id="posLabel">5.0 mm</span><input id="posStep" type="range" min="1" max="20" value="5"></label>
+<div class="controls">
+<span></span><button data-key="w">W · X+</button><span></span>
+<button data-key="a">A · Y−</button><button data-key="s">S · X−</button><button data-key="d">D · Y+</button>
+<span></span><button data-key="r">R · Z+</button><span></span>
+<span></span><button data-key="f">F · Z−</button><span></span></div>
+<h3>Wrist rotation (axis-angle increments)</h3><div class="controls">
+<button data-key="i">I · Rx+</button><button data-key="l">L · Ry+</button><button data-key="u">U · Rz+</button>
+<button data-key="k">K · Rx−</button><button data-key="j">J · Ry−</button><button data-key="m">M · Rz−</button></div>
+<label>Rotation step: <span id="rotLabel">3.0°</span><input id="rotStep" type="range" min="1" max="8" value="3"></label>
+<button data-grip="open">O · Open gripper</button><button data-grip="close">C · Close gripper</button>
+<button id="pause">Pause</button><button id="resume">Resume</button><button id="estop" class="danger">Emergency stop</button>
+<p>Keyboard: W/S world X, A/D world Y, R/F world Z; I/K, L/J, U/M rotate; O open, C close, Space pause. Key repeat is ignored; each press sends one bounded simulator action.</p></section>
+<section><b>Robot and command status</b><pre id="status">Waiting for simulator…</pre><div id="message"></div></section>
+<script>
+const token="__TOKEN__";let epoch=0,seq=0,mode="CONNECTING",busy=false;
+const $=id=>document.getElementById(id);
+function update(s){epoch=s.epoch;seq=s.next_seq-1;mode=s.mode;$('owner').textContent=`CONTROL OWNER: ${s.owner} · π0.5: OFF · mode ${s.mode}`;$('task').textContent=s.task;$('seed').textContent=s.seed;$('stateIndex').textContent=`${s.saved_init_state_index} (${s.saved_init_state_sha256.slice(0,12)}…)`;$('step').textContent=s.step;$('success').textContent=s.is_success?'true':'false';$('front').src='data:image/jpeg;base64,'+s.images.front;$('wrist').src='data:image/jpeg;base64,'+s.images.wrist;$('status').textContent=JSON.stringify({robot_state:s.robot_state,reward:s.reward,last_action:s.last_action,mode:s.mode},null,2);const active=s.mode==='HUMAN';document.querySelectorAll('[data-key],[data-grip]').forEach(b=>b.disabled=!active||busy);$('pause').disabled=!active||busy;$('resume').disabled=s.mode!=='PAUSED'||busy;$('estop').disabled=!['HUMAN','PAUSED'].includes(s.mode)||busy;}
+async function call(path,body){if(busy)return;busy=true;$('message').textContent='Sending one bounded command…';try{const r=await fetch(path,{method:body?'POST':'GET',headers:{'X-Teleop-Token':token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,cache:'no-store'});const d=await r.json();if(!r.ok)throw Error(d.error||`HTTP ${r.status}`);update(d);$('message').textContent='';}catch(e){$('message').textContent=e.message;await poll();}finally{busy=false;}}
+function act(key='',gripper=null){if(mode!=='HUMAN'||busy)return;seq++;call('/api/action',{key,gripper,epoch,seq,position_step_m:Number($('posStep').value)/1000,rotation_step_rad:Number($('rotStep').value)*Math.PI/180});}
+async function poll(){if(busy)return;try{const r=await fetch('/api/state',{headers:{'X-Teleop-Token':token},cache:'no-store'});if(r.ok)update(await r.json());}catch(e){$('message').textContent='Connection lost. No further commands are sent automatically.';}}
+document.querySelectorAll('[data-key]').forEach(b=>b.onclick=()=>act(b.dataset.key));document.querySelectorAll('[data-grip]').forEach(b=>b.onclick=()=>act('',b.dataset.grip));
+$('pause').onclick=()=>call('/api/pause',{});$('resume').onclick=()=>call('/api/resume',{});$('estop').onclick=()=>{if(confirm('Stop all simulator commands for this session? Restarting the server will be required to reset.'))call('/api/estop',{});};
+$('posStep').oninput=()=> $('posLabel').textContent=(Number($('posStep').value)).toFixed(1)+' mm';$('rotStep').oninput=()=> $('rotLabel').textContent=Number($('rotStep').value).toFixed(1)+'°';
+window.addEventListener('keydown',e=>{if(e.repeat||/INPUT|TEXTAREA/.test(document.activeElement.tagName))return;const k=e.key.toLowerCase();if('wsadrfiljukm'.includes(k)){e.preventDefault();act(k);}else if(k==='o'||k==='c'){e.preventDefault();act('',k==='o'?'open':'close');}else if(e.code==='Space'){e.preventDefault();if(mode==='HUMAN')call('/api/pause',{});}});
+setInterval(poll,1000);poll();
+</script></body></html>
