@@ -8,9 +8,11 @@ import io
 import json
 import os
 from pathlib import Path
+import queue
 import secrets
 import signal
 import sys
+import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -169,8 +171,73 @@ class TeleopSession:
 
     def close(self):
         if self.video is not None:
-            self.video.close()
+            self.video.release()
         self.env.close()
+
+
+class SimulationWorker:
+    """Keep the MuJoCo/OSMesa context on one owner thread for its full lifetime."""
+    def __init__(self, output_dir: Path):
+        self.jobs = queue.Queue(maxsize=1)
+        self.gate = threading.Lock()
+        self.ready = threading.Event()
+        self.session = None
+        self.start_error = None
+        self.thread = threading.Thread(target=self._run, args=(output_dir,),
+                                       name="libero-simulator-owner", daemon=True)
+        self.thread.start()
+        if not self.ready.wait(timeout=120):
+            raise RuntimeError("timed out creating the LIBERO environment on its owner thread")
+        if self.start_error:
+            raise RuntimeError("LIBERO simulator initialization failed") from self.start_error
+
+    def _run(self, output_dir):
+        env = None
+        try:
+            env = create_env()
+            self.session = TeleopSession(env, output_dir)
+            self.ready.set()
+            while True:
+                job = self.jobs.get()
+                if job is None:
+                    break
+                operation, result, finished = job
+                try:
+                    result["value"] = operation()
+                except BaseException as exc:
+                    result["error"] = exc
+                finally:
+                    finished.set()
+        except BaseException as exc:
+            self.start_error = exc
+            self.ready.set()
+        finally:
+            if self.session is not None:
+                self.session.close()
+            elif env is not None:
+                env.close()
+
+    def invoke(self, operation):
+        # One in-flight request maximum: a dropped connection cannot leave a
+        # stale action waiting behind a currently executing action.
+        if not self.gate.acquire(blocking=False):
+            raise RuntimeError("simulator busy; no action was queued")
+        try:
+            result, finished = {}, threading.Event()
+            self.jobs.put_nowait((operation, result, finished))
+            finished.wait()
+            if "error" in result:
+                raise result["error"]
+            return result.get("value")
+        finally:
+            self.gate.release()
+
+    def close(self):
+        if not self.thread.is_alive():
+            return
+        with self.gate:
+            self.jobs.put_nowait(None)
+            self.thread.join(timeout=30)
 
 
 def create_env():
@@ -187,38 +254,49 @@ def create_env():
 
 def self_test(output_root: Path):
     from thesis_vla.teleoperation import map_key
-    env = create_env()
-    try:
-        obs0, info0 = env.reset(seed=SEED, options={"saved_init_state_index": STATE_INDEX})
-        if info0.get("saved_init_state_sha256") != STATE_SHA256:
-            raise RuntimeError("initial state hash mismatch")
-        x0 = float(obs0["robot_state"]["eef"]["pos"][0])
-        current = obs0
-        action = np.asarray(map_key("w", position_step_m=.005), dtype=np.float32)
-        for _ in range(3):
-            current, _, _, _, _ = env.step(action)
-        x1 = float(current["robot_state"]["eef"]["pos"][0])
-        if not np.isfinite(x1) or x1 <= x0:
-            raise RuntimeError(f"W/world-X command did not produce positive world-X motion: {x0:.6f} -> {x1:.6f}")
-        obs1, info1 = env.reset(seed=SEED, options={"saved_init_state_index": STATE_INDEX})
-        if info1.get("saved_init_state_sha256") != STATE_SHA256:
-            raise RuntimeError("reset after motion did not restore pinned initial state")
-        for key in ("image", "image2"):
-            if np.asarray(obs1["pixels"][key]).shape != (256, 256, 3):
-                raise RuntimeError(f"unexpected camera shape for {key}")
-        print(json.dumps({"TELEOP_SELF_TEST": "PASS", "task_id": TASK_ID, "seed": SEED,
-                          "state_index": STATE_INDEX, "state_sha256": STATE_SHA256,
-                          "world_x_before_m": x0, "world_x_after_3x_W_m": x1,
-                          "delta_x_m": x1-x0, "cameras": ["image", "image2"],
-                          "human_input": False, "vla_loaded": False}))
-    finally:
-        env.close()
+    with tempfile.TemporaryDirectory(prefix="libero-teleop-selftest-") as tmp:
+        worker = SimulationWorker(Path(tmp))
+        try:
+            def check_on_owner_thread():
+                session = worker.session
+                obs0, info0 = session.observation, session.reset_info
+                if info0.get("saved_init_state_sha256") != STATE_SHA256:
+                    raise RuntimeError("initial state hash mismatch")
+                x0 = float(obs0["robot_state"]["eef"]["pos"][0])
+                action = np.asarray(map_key("w", position_step_m=.005), dtype=np.float32)
+                current = obs0
+                for _ in range(3):
+                    current, _, _, _, _ = session.env.step(action)
+                x1 = float(current["robot_state"]["eef"]["pos"][0])
+                if not np.isfinite(x1) or x1 <= x0:
+                    raise RuntimeError(f"W/world-X command did not produce positive world-X motion: {x0:.6f} -> {x1:.6f}")
+                metrics = {}
+                for key in ("image", "image2"):
+                    image = np.asarray(current["pixels"][key])
+                    if image.shape != (256, 256, 3):
+                        raise RuntimeError(f"unexpected camera shape for {key}: {image.shape}")
+                    metrics[key] = {"std": float(image.std()), "range": int(image.max()-image.min())}
+                    if image.std() < 25 or image.max()-image.min() < 100:
+                        raise RuntimeError(f"{key} image appears blank/corrupt: {metrics[key]}")
+                restored, reset_info = session.env.reset(seed=SEED, options={"saved_init_state_index": STATE_INDEX})
+                if reset_info.get("saved_init_state_sha256") != STATE_SHA256:
+                    raise RuntimeError("reset after motion did not restore pinned initial state")
+                session.observation, session.reset_info = restored, reset_info
+                return {"TELEOP_SELF_TEST": "PASS", "task_id": TASK_ID, "seed": SEED,
+                        "state_index": STATE_INDEX, "state_sha256": STATE_SHA256,
+                        "world_x_before_m": x0, "world_x_after_3x_W_m": x1,
+                        "delta_x_m": x1-x0, "camera_metrics": metrics,
+                        "owner_thread": threading.current_thread().name,
+                        "human_input": False, "vla_loaded": False}
+            print(json.dumps(worker.invoke(check_on_owner_thread), allow_nan=False))
+        finally:
+            worker.close()
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--self-test", action="store_true")
-    parser.add_argument("--output", default="outputs/human_teleop_task1_state0_seed1101")
+    parser.add_argument("--output", default="outputs/human_teleop_task1_state0_seed1101_retry1")
     parser.add_argument("--port", type=int, default=PORT)
     args = parser.parse_args()
     if args.self_test:
@@ -230,8 +308,8 @@ def main():
     out.mkdir(parents=True)
     pid_path = out / "server.pid"
     pid_path.write_text(str(os.getpid()), encoding="ascii")
-    env = create_env()
-    session = TeleopSession(env, out)
+    worker = SimulationWorker(out)
+    session = worker.session
     token = secrets.token_urlsafe(24)
     page = HTML.read_text(encoding="utf-8").replace("__TOKEN__", token)
 
@@ -269,14 +347,14 @@ def main():
                     length = int(self.headers.get("Content-Length", "0"))
                     if length <= 0 or length > 2048: raise ValueError("invalid request size")
                     body = json.loads(self.rfile.read(length))
-                    self._send(200, session.execute(body, __import__("thesis_vla.teleoperation", fromlist=["map_key"]).map_key))
+                    self._send(200, worker.invoke(lambda: session.execute(body, __import__("thesis_vla.teleoperation", fromlist=["map_key"]).map_key)))
                 except RuntimeError as e: self._send(409, {"error": str(e)})
                 except Exception as e: self._send(400, {"error": str(e)})
                 return
             if self.path in {"/api/pause", "/api/resume", "/api/estop"}:
                 if not self._auth(): return
                 target = {"/api/pause": "PAUSED", "/api/resume": "HUMAN", "/api/estop": "ESTOP"}[self.path]
-                try: self._send(200, session.transition(target))
+                try: self._send(200, worker.invoke(lambda: session.transition(target)))
                 except RuntimeError as e: self._send(409, {"error": str(e)})
                 except Exception as e: self._send(400, {"error": str(e)})
                 return
@@ -292,7 +370,7 @@ def main():
     except KeyboardInterrupt: pass
     finally:
         server.server_close()
-        session.close()
+        worker.close()
         pid_path.unlink(missing_ok=True)
 
 

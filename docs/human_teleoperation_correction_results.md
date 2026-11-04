@@ -2,11 +2,12 @@
 
 ## Status and scope
 
-Gates A–C are implemented and mechanically tested on BEAST's existing pinned
-Python 3.12 environment. The private LIBERO control page is prepared for Gate D.
-No VLA, GP model, learned policy, expert controller, or human command was used.
-No grasp or task success is claimed. The user must operate the browser controls
-before any genuine human demonstration can be recorded.
+Gates A–C are implemented on BEAST's existing pinned Python 3.12 environment.
+The user's first browser attempt sent 16 human commands, then both camera frames
+became corrupted. Those commands and the video are preserved, but the visual
+failure means no grasp or task outcome is validated. No VLA, GP model, learned
+policy, or expert controller was used, and no task success is claimed. The
+thread-affinity fix below is ready for a fresh manual-control attempt.
 
 The interface runs LIBERO-Spatial task 1, “pick up the black bowl next to the
 ramekin and place it on the plate,” from saved initial state 0 with seed 1101.
@@ -46,6 +47,15 @@ cause client retries or background stepping. The server binds only to BEAST's
   pinned state. This is a controller mapping check, **not human input**.
 - Both camera arrays were confirmed as 256×256 RGB and their initial-state
   hashes matched the fixed scenario.
+- The first browser attempt exposed an OSMesa thread-affinity bug: camera
+  rendering performed from HTTP request threads returned corrupted frames.
+  The server now creates, steps and closes MuJoCo on one dedicated owner
+  thread; concurrent HTTP requests are rejected rather than queued. Regression
+  self-test on that exact owner thread passed after three mapped W actions and
+  reset: front-frame standard deviation 50.76/range 239; wrist-frame standard
+  deviation 64.02/range 245. The first attempt's trajectory and video are
+  preserved in the original run folder; the corrupted video is not evidence
+  of a valid visual demonstration.
 - The server offers a browser status endpoint and records each submitted human
   command with before/after robot state, mapped/executed action, task status,
   ownership and synchronized front/wrist video frames. Runtime logs and video
@@ -75,12 +85,14 @@ When finished, close the browser and stop the tunnel with Ctrl+C in the
 PowerShell window. The simulation server can be stopped cleanly with:
 
 ```powershell
-ssh friend-gpu "cd /home/jess/projects/shared-autonomy-robot-learning-human-teleop && test -f outputs/human_teleop_task1_state0_seed1101/server.pid && xargs -r kill -TERM < outputs/human_teleop_task1_state0_seed1101/server.pid"
+ssh friend-gpu "cd /home/jess/projects/shared-autonomy-robot-learning-human-teleop && test -f outputs/human_teleop_task1_state0_seed1101_retry1/server.pid && xargs -r kill -TERM < outputs/human_teleop_task1_state0_seed1101_retry1/server.pid"
 ```
 
 Runtime trajectory and camera video are saved in the ignored
-`outputs/human_teleop_task1_state0_seed1101/` directory; the simulator server
-log is `outputs/teleop_server.log`. Do not remove them before we review any
-human-operated test. After manual control works, the next step is
+`outputs/human_teleop_task1_state0_seed1101_retry1/` directory; the simulator
+server log is `outputs/teleop_server_retry1.log`. The first attempt remains
+preserved under `outputs/human_teleop_task1_state0_seed1101/`. Do not remove
+either folder before we review the human-operated test. After manual control
+works, the next step is
 to verify the recorded trajectory and only then implement the separate
 VLA-to-human-to-VLA handoff.
