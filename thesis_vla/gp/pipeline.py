@@ -33,11 +33,12 @@ def _git_commit() -> str | None:
         return None
 
 def run_gp_experiment(data_path: str | Path, output_dir: str | Path, config_path: str | Path,
-                      *, evaluate_test: bool = False, synthetic_data: bool = False, verified_ucl_dataset: bool = False) -> dict:
+                      *, evaluate_test: bool = False, synthetic_data: bool = False,
+                      verified_ucl_dataset: bool = False, verified_beast_dataset: bool = False) -> dict:
     data_path, output_dir, config_path = Path(data_path).expanduser(), Path(output_dir).expanduser(), Path(config_path).expanduser()
     config = json.loads(config_path.read_text(encoding="utf-8"))
-    if synthetic_data and verified_ucl_dataset:
-        raise ValueError("A dataset cannot be both synthetic and verified UCL data")
+    if sum((synthetic_data, verified_ucl_dataset, verified_beast_dataset)) > 1:
+        raise ValueError("Choose only one dataset identity: synthetic, verified UCL, or verified BEAST")
     if config.get("schema_version") != 1:
         raise ValueError("Unsupported GP config schema_version")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -55,6 +56,11 @@ def run_gp_experiment(data_path: str | Path, output_dir: str | Path, config_path
             raise ValueError("The provided tar bundle does not match the documented UCL GP dataset SHA-256")
         if X.shape != (161, 8) or Y.shape != (161, 7) or np.unique(dataset.episode_id).size != 20:
             raise ValueError("The verified UCL dataset must contain 161 X/Y pairs across 20 episodes")
+    if verified_beast_dataset:
+        if data_sha256 != "d0fe03a61d2a14ac213e6efbcf65391b2e6015e0d4857a890c1bbb1982f6b27b":
+            raise ValueError("The provided tar bundle does not match the verified BEAST pi0.5 dataset SHA-256")
+        if X.shape != (170, 8) or Y.shape != (170, 7) or np.unique(dataset.episode_id).size != 20:
+            raise ValueError("The verified BEAST dataset must contain 170 X/Y pairs across 20 episodes")
     X_train, Y_train = X[split.train], Y[split.train]
     X_val, Y_val = X[split.validation], Y[split.validation]
     gp_config = config["gp"]
@@ -69,9 +75,11 @@ def run_gp_experiment(data_path: str | Path, output_dir: str | Path, config_path
     val_gp_mean, val_gp_std = gp.predict(X_val)
     val_ridge_mean = ridge.predict(X_val)
     metrics = {
-        "dataset_label": "synthetic_fixture" if synthetic_data else ("verified_ucl_pi05" if verified_ucl_dataset else "user_supplied_unverified"),
-        "real_vla_results": bool(verified_ucl_dataset),
-        "warning": "Metrics are not verified real VLA results unless the supplied input is the validated UCL benchmark dataset.",
+        "dataset_label": "synthetic_fixture" if synthetic_data else (
+            "verified_ucl_pi05" if verified_ucl_dataset else (
+                "verified_beast_pi05" if verified_beast_dataset else "user_supplied_unverified")),
+        "real_vla_results": bool(verified_ucl_dataset or verified_beast_dataset),
+        "warning": "Metrics are verified real VLA-derived results only for the exact validated UCL or BEAST dataset bundle.",
         "validation": {
             "gp": regression_metrics(Y_val, val_gp_mean, val_gp_std, interval_levels=levels),
             "ridge": regression_metrics(Y_val, val_ridge_mean),
@@ -111,6 +119,7 @@ def run_gp_experiment(data_path: str | Path, output_dir: str | Path, config_path
         "dataset_path": str(data_path.resolve()),
         "dataset_sha256": data_sha256,
         "verified_ucl_dataset": bool(verified_ucl_dataset),
+        "verified_beast_dataset": bool(verified_beast_dataset),
         "dataset_label": metrics["dataset_label"],
         "config_sha256": _sha256(config_path),
         "config_path": str(config_path.resolve()),

@@ -151,3 +151,17 @@ def test_verified_ucl_mode_rejects_unmatched_synthetic_bundle(tmp_path):
     data_path = write_synthetic_gp_npz(tmp_path / "synthetic.npz")
     with pytest.raises(ValueError, match="documented UCL GP dataset SHA-256"):
         run_gp_experiment(data_path, tmp_path / "verified", CONFIG, verified_ucl_dataset=True)
+
+
+
+def test_verified_beast_mode_rejects_unmatched_dataset(tmp_path):
+    data_path = write_synthetic_gp_npz(tmp_path / "synthetic.npz")
+    with pytest.raises(ValueError, match="verified BEAST pi0.5 dataset SHA-256"):
+        run_gp_experiment(data_path, tmp_path / "verified_beast", CONFIG, verified_beast_dataset=True)
+
+
+def test_dataset_identity_flags_are_mutually_exclusive(tmp_path):
+    data_path = write_synthetic_gp_npz(tmp_path / "synthetic.npz")
+    with pytest.raises(ValueError, match="Choose only one dataset identity"):
+        run_gp_experiment(data_path, tmp_path / "conflicting", CONFIG,
+                          synthetic_data=True, verified_beast_dataset=True)

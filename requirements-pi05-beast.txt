@@ -1,0 +1,10 @@
+# Python 3.12 runtime for BEAST. Install the CUDA wheels from
+# requirements-pi05-beast-torch.txt first, then install this file from PyPI
+# with -c constraints-pi05-ucl.txt. Versions follow the validated UCL stack
+# where the host-specific CUDA compatibility change permits.
+torchcodec==0.10.0
+hf-libero==0.1.4
+lerobot[libero,pi] @ git+https://github.com/huggingface/lerobot.git@146d8474932c8b566717eb2738ba459337ab71c4
+pytest==9.2.0
+cmake==3.31.10
+imageio[ffmpeg]==2.38.1

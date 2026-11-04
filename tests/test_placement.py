@@ -1,7 +1,9 @@
 from types import SimpleNamespace
+import numpy as np
 import pytest
 import torch
-from thesis_vla.placement import HEAD_PATHS, place_action_policy
+from thesis_vla.placement import (HEAD_PATHS, place_action_policy,
+    verify_single_gpu_action_contract, verify_single_gpu_placement)
 
 
 class SmallPolicy(torch.nn.Module):
@@ -22,10 +24,10 @@ class SmallPolicy(torch.nn.Module):
         return x
 
 
-@pytest.mark.parametrize("device", ["cpu", "cuda:1"])
+@pytest.mark.parametrize("device", ["cpu", "cuda:0", "cuda:1"])
 def test_placement_preserves_values_dtypes_and_computation(device):
-    if device.startswith("cuda") and (not torch.cuda.is_available() or torch.cuda.device_count() < 2):
-        pytest.skip("requires two CUDA devices")
+    if device.startswith("cuda") and (not torch.cuda.is_available() or torch.cuda.device_count() <= int(device.split(":")[1])):
+        pytest.skip(f"requires visible {device}")
     torch.manual_seed(71)
     p = SmallPolicy().eval()
     original = {k: v.clone() for k, v in p.state_dict().items()}
@@ -34,7 +36,8 @@ def test_placement_preserves_values_dtypes_and_computation(device):
     reference = SmallPolicy().eval().to(device)
     reference.load_state_dict(original)
     expected = reference(x.to(device))
-    place_action_policy(p, device)
+    placement = place_action_policy(p, device, verify_integrity=True)
+    assert placement["weight_integrity_sha256_before_after"]
     actual = p(x.to(device))
     torch.testing.assert_close(actual, expected, rtol=0, atol=0)
     assert p.state_dict().keys() == original.keys()
@@ -90,3 +93,106 @@ def test_pinned_image_preprocessing_is_bitwise_equal_with_cpu_first_parameter():
         for value, reference in zip(values, baseline, strict=True):
             assert value.device == torch.device("cuda:1")
             torch.testing.assert_close(value, reference, rtol=0, atol=0)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available() or torch.cuda.device_count() != 1,
+                    reason="requires the one-GPU BEAST configuration")
+def test_single_gpu_placement_and_action_contract():
+    torch.manual_seed(71)
+    policy = SmallPolicy().eval()
+    placement = place_action_policy(policy, "cuda:0", verify_integrity=True)
+    validated = verify_single_gpu_placement(policy, "cuda:0")
+    assert placement["weight_integrity_sha256_before_after"]
+    assert validated["visible_cuda_devices"] == 1
+    assert all(p.device.type == "cpu" for h in HEAD_PATHS for p in policy.get_submodule(h).parameters())
+
+    class ChunkPolicy:
+        def predict_action_chunk(self, batch):
+            values = np.zeros((1, 50, 7), dtype=np.float32)
+            values[:, 0, 0] = 0.25
+            return values
+        def reset(self):
+            pass
+
+    from thesis_vla.pi05 import Pi05PolicyAdapter
+    adapter = Pi05PolicyAdapter(ChunkPolicy(), lambda obs, task: {}, task="test")
+    adapter.prediction_state_capture = {"vla_normalized": np.zeros(8, dtype=np.float32)}
+    observation = {"pixels": {
+        "image": np.zeros((256, 256, 3), dtype=np.uint8),
+        "image2": np.zeros((256, 256, 3), dtype=np.uint8),
+    }}
+    result = verify_single_gpu_action_contract(adapter, observation)
+    assert result["passed"]
+    assert result["predicted_chunk_shape"] == [1, 50, 7]
+    assert result["checkpoint_normalized_state_shape"] == [8]
+
+
+
+def test_meta_pi05_nonpersistent_buffers_are_reconstructed_without_touching_weights():
+    from thesis_vla.placement import materialize_pi05_meta_buffers
+
+    class Position(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.num_positions = 4
+            with torch.device("meta"):
+                self.register_buffer("position_ids", torch.empty((1, 4), dtype=torch.long), persistent=False)
+
+    class Embedding(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.scalar_embed_scale = 2.5
+            with torch.device("meta"):
+                self.register_buffer("embed_scale", torch.empty(()), persistent=False)
+
+    class Rotary(torch.nn.Module):
+        rope_type = "default"
+        config = object()
+        attention_scaling = None
+
+        def __init__(self):
+            super().__init__()
+            with torch.device("meta"):
+                self.register_buffer("inv_freq", torch.empty((2,)), persistent=False)
+                self.register_buffer("original_inv_freq", torch.empty((2,)), persistent=False)
+
+        @staticmethod
+        def compute_default_rope_parameters(config, device=None):
+            return torch.tensor([1.0, 0.25], device=device), 1.0
+
+    class MetaBufferPolicy(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.vision = Position()
+            self.embedding = Embedding()
+            self.rotary = Rotary()
+            self.weight = torch.nn.Parameter(torch.tensor([3.0]))
+
+    policy = MetaBufferPolicy()
+    materialized = materialize_pi05_meta_buffers(policy)
+    assert set(materialized) == {
+        "vision.position_ids",
+        "embedding.embed_scale",
+        "rotary.inv_freq",
+        "rotary.original_inv_freq",
+    }
+    assert not any(buffer.is_meta for buffer in policy.buffers())
+    torch.testing.assert_close(policy.vision.position_ids, torch.tensor([[0, 1, 2, 3]]))
+    torch.testing.assert_close(policy.embedding.embed_scale, torch.tensor(2.5))
+    torch.testing.assert_close(policy.rotary.inv_freq, torch.tensor([1.0, 0.25]))
+    torch.testing.assert_close(policy.rotary.original_inv_freq, policy.rotary.inv_freq)
+    torch.testing.assert_close(policy.weight, torch.tensor([3.0]))
+    assert policy.rotary.attention_scaling == 1.0
+
+
+def test_meta_buffer_reconstruction_fails_closed_on_unknown_buffer():
+    from thesis_vla.placement import materialize_pi05_meta_buffers
+
+    class Unknown(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            with torch.device("meta"):
+                self.register_buffer("unknown", torch.empty((1,)), persistent=False)
+
+    with pytest.raises(RuntimeError, match="Cannot safely reconstruct"):
+        materialize_pi05_meta_buffers(Unknown())

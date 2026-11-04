@@ -57,7 +57,7 @@ def test_pretrained_loader_propagates_incompatible_weights(tmp_path, monkeypatch
     class TinyPolicy(torch.nn.Module):
         def __init__(self, cfg):
             super().__init__()
-            assert cfg.device == "cpu" and not cfg.compile_model
+            assert cfg.device in {"cpu", "meta"} and not cfg.compile_model
             self.config = cfg
             self.weight = torch.nn.Parameter(torch.zeros(2))
         def _convert_openpi_state_dict(self, state):
@@ -74,3 +74,75 @@ def test_pretrained_loader_propagates_incompatible_weights(tmp_path, monkeypatch
     loaded = Pi05PolicyAdapter.from_pretrained(tmp_path, task="fixture", device="cpu")
     torch.testing.assert_close(loaded.weight, torch.tensor([0.25, 0.75]))
     assert not loaded.training
+
+
+def test_meta_initialized_loader_assigns_checkpoint_weights_without_random_model_copy(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import torch
+    from safetensors.torch import save_file
+    from lerobot.configs import PreTrainedConfig
+    from lerobot.policies.pi05 import modeling_pi05
+
+    config = SimpleNamespace(device="cuda", dtype=torch.float32)
+    monkeypatch.setattr(PreTrainedConfig, "from_pretrained", lambda *a, **kw: config)
+
+    class TinyPolicy(torch.nn.Module):
+        def __init__(self, cfg):
+            super().__init__()
+            assert cfg.device == "meta" and not cfg.compile_model
+            self.config = cfg
+            self.weight = torch.nn.Parameter(torch.zeros(2))
+        def _convert_openpi_state_dict(self, state):
+            return state
+
+    monkeypatch.setattr(modeling_pi05, "PI05Policy", TinyPolicy)
+    monkeypatch.setattr(Pi05PolicyAdapter, "from_lerobot_policy", lambda policy, **kw: policy)
+    save_file({"weight": torch.tensor([0.25, 0.75])}, tmp_path / "model.safetensors")
+    loaded = Pi05PolicyAdapter.from_pretrained(
+        tmp_path, task="fixture", device="cpu", meta_init=True
+    )
+    assert loaded.weight.device.type == "cpu" and not loaded.weight.is_meta
+    torch.testing.assert_close(loaded.weight, torch.tensor([0.25, 0.75]))
+
+
+
+def test_passive_gp_is_chunk_boundary_only_and_does_not_change_vla_actions():
+    class FakeGP:
+        model_sha256 = "fixture-hash"
+        last_worker_prediction_seconds = 0.001
+        last_round_trip_seconds = 0.002
+
+        def __init__(self):
+            self.states = []
+
+        def predict(self, state):
+            self.states.append(np.asarray(state).copy())
+            return np.full(7, 99.0), np.full(7, 0.5)
+
+    def make_adapter(passive_gp=None):
+        capture = {}
+        def prepare(observation, task):
+            capture["vla_normalized"] = np.asarray(observation["state"], dtype=np.float32).copy()
+            return {}
+        adapter = Pi05PolicyAdapter(ChunkPolicy(), prepare, task="fixture", execute_steps=2,
+                                    passive_gp=passive_gp)
+        adapter.prediction_state_capture = capture
+        return adapter
+
+    baseline = make_adapter()
+    gp = FakeGP()
+    monitored = make_adapter(gp)
+    observations = [{"state": np.arange(8, dtype=np.float32) + i} for i in range(3)]
+    baseline_proposals = [baseline.act(obs) for obs in observations]
+    monitored_proposals = [monitored.act(obs) for obs in observations]
+
+    assert len(gp.states) == 2  # one fresh chunk at steps 0 and 2
+    np.testing.assert_array_equal(gp.states[0], observations[0]["state"])
+    np.testing.assert_array_equal(gp.states[1], observations[2]["state"])
+    for plain, watched in zip(baseline_proposals, monitored_proposals, strict=True):
+        np.testing.assert_array_equal(plain.predicted_action, watched.predicted_action)
+        np.testing.assert_array_equal(plain.executed_action, watched.executed_action)
+    assert monitored_proposals[0].passive_gp_prediction["model_sha256"] == "fixture-hash"
+    assert monitored_proposals[0].passive_gp_prediction["input_state_vla_normalized"] == observations[0]["state"].tolist()
+    assert monitored_proposals[1].passive_gp_prediction is None
+    assert monitored_proposals[2].passive_gp_prediction["input_state_vla_normalized"] == observations[2]["state"].tolist()

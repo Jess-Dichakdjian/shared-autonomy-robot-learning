@@ -30,6 +30,26 @@ def _available_memory_bytes() -> int:
     return available
 
 
+
+def _cuda_tensor_smoke(torch) -> None:
+    """Execute tiny real CUDA FP32 and BF16 operations, not just a device query."""
+    device = torch.device("cuda:0")
+    torch.cuda.set_device(device)
+    x = torch.arange(1024, device=device, dtype=torch.float32)
+    actual = x.square() + 1
+    torch.cuda.synchronize(device)
+    expected = torch.arange(1024, dtype=torch.float32).square() + 1
+    if not torch.equal(actual.cpu(), expected):
+        raise RuntimeError("CUDA FP32 elementwise result differs from CPU reference")
+    matrix = torch.ones((256, 256), device=device, dtype=torch.bfloat16)
+    product = matrix @ matrix
+    torch.cuda.synchronize(device)
+    if not torch.isfinite(product).all().item() or product[0, 0].item() != 256:
+        raise RuntimeError("CUDA BF16 matrix multiplication check failed")
+    print("CUDA_FP32_ELEMENTWISE=passed")
+    print("CUDA_BF16_MATMUL=passed")
+
+
 def _existing_parent(path: Path) -> Path:
     candidate = path.expanduser().absolute()
     while not candidate.exists():
@@ -58,6 +78,18 @@ def main() -> int:
         print(f"CUDA_CAPABILITY={props.major}.{props.minor}")
         print(f"VRAM_TOTAL_GIB={total_bytes / 2**30:.2f}")
         print(f"VRAM_FREE_GIB={free_bytes / 2**30:.2f}")
+        cpu_free = _available_memory_bytes()
+        cpu_required = int(CHECKPOINT_BYTES * CPU_RAM_HEADROOM_FACTOR)
+        print(f"CPU_RAM_AVAILABLE_GIB={cpu_free / 2**30:.2f}")
+        print(f"CPU_RAM_REQUIRED_GIB={cpu_required / 2**30:.2f} (1.5x checkpoint size for strict meta loading)")
+        if cpu_free < cpu_required:
+            print("PREFLIGHT_FAILED: insufficient host/WSL RAM headroom for checkpoint loading", file=sys.stderr)
+            return 7
+        try:
+            _cuda_tensor_smoke(torch)
+        except Exception as exc:
+            print(f"PREFLIGHT_FAILED: actual CUDA tensor operation failed: {exc}", file=sys.stderr)
+            return 6
     else:
         free_bytes = _available_memory_bytes()
         total_bytes = int(next(

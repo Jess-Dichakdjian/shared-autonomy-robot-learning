@@ -194,3 +194,8 @@ Run the interface and baseline tests:
 ```bash
 PYTHONPATH=.:tests python -m pytest -q tests/test_gp_baseline.py tests/test_gp_inference.py
 ```
+
+
+## Verified BEAST dataset
+
+The separately collected BEAST dataset, its episode-held-out GP evaluation, artifact paths, metrics, passive-inference comparison, environment conditions and limitations are recorded in [the BEAST VLA-GP integration report](beast_pi05_vla_gp_integration_2026-11-04.md). BEAST and UCL datasets/results must remain separately identified. The BEAST run used OSMesa rendering under WSL2; UCL's validated run used EGL. These rendering conditions are not pixel-identical.

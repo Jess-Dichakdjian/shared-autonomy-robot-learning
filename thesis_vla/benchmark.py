@@ -61,6 +61,7 @@ def validate_episode(path, *, require_video=True, require_gp=True):
         raise ValueError("Inconsistent metrics")
     latest = None
     prediction_count = 0
+    passive_enabled = bool(episode.get("configuration", {}).get("passive_gp_monitor", {}).get("enabled", False))
     for index, row in enumerate(rows):
         if row["step"] != index or row["seed"] != episode["seed"]:
             raise ValueError("Inconsistent step identity")
@@ -70,6 +71,24 @@ def validate_episode(path, *, require_video=True, require_gp=True):
                 raise ValueError("Invalid action")
         if np.max(np.abs(row["executed_action"])) > 1:
             raise ValueError("Executed action out of bounds")
+        passive = row.get("passive_gp_prediction")
+        if passive_enabled:
+            if row["chunk_start"]:
+                if not isinstance(passive, dict):
+                    raise ValueError("Fresh prediction is missing its passive GP record")
+                state = np.asarray(passive.get("input_state_vla_normalized"))
+                mean = np.asarray(passive.get("mean_raw_normalized_action"))
+                std = np.asarray(passive.get("predictive_std_raw_normalized_action"))
+                source_state = np.asarray(row.get("prediction_state", {}).get("vla_normalized"))
+                if state.shape != (8,) or mean.shape != (7,) or std.shape != (7,) or source_state.shape != (8,):
+                    raise ValueError("Passive GP record has incompatible state/action dimensions")
+                if not np.isfinite(state).all() or not np.isfinite(mean).all() or not np.isfinite(std).all() or np.any(std <= 0):
+                    raise ValueError("Passive GP record contains non-finite predictions")
+                np.testing.assert_array_equal(state, source_state)
+            elif passive is not None:
+                raise ValueError("Queued action must not receive a new passive GP prediction")
+        elif passive is not None:
+            raise ValueError("Passive GP output was logged while monitor was disabled")
         if require_gp:
             if row["saved_init_state_index"] != episode["reset_info"]["saved_init_state_index"]:
                 raise ValueError("Initial-state identity changed")

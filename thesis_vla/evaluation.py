@@ -90,6 +90,7 @@ def run_evaluation(env, policy, output_dir: str | Path, *, episodes: int, base_s
                     "predicted_action": proposal.predicted_action, "executed_action": proposal.executed_action,
                     "chunk_id": proposal.chunk_id, "chunk_index": proposal.chunk_index,
                     "chunk_start": proposal.is_chunk_start, "inference_seconds": inference_seconds,
+                    "passive_gp_prediction": proposal.passive_gp_prediction,
                     "robot_state": _robot_state(observation), "next_robot_state": _robot_state(next_observation),
                     "reward": reward, "terminated": terminated, "truncated": truncated,
                     "success": found_success, "configuration": config_record,

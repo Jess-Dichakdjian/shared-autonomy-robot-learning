@@ -3,11 +3,13 @@ from pathlib import Path
 from huggingface_hub import snapshot_download
 
 destination = Path.home() / ".cache" / "libero" / "assets"
+LIBERO_ASSETS_REVISION = "0b3ea86be5fe169d0fd036ae63d1070ec09e90f6"
 destination.mkdir(parents=True, exist_ok=True)
 print(f"Downloading official LIBERO simulation assets to {destination}")
 snapshot_download(
     repo_id="lerobot/libero-assets",
     repo_type="dataset",
+    revision=LIBERO_ASSETS_REVISION,
     local_dir=str(destination),
 )
 required = ("articulated_objects", "stable_scanned_objects", "turbosquid_objects", "stable_hope_objects")

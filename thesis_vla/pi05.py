@@ -1,8 +1,11 @@
 """Chunked pi0.5 inference adapter with explicit prediction/execution logging."""
 from collections import deque
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 import numpy as np
+
+PINNED_PI05_MODEL_SHA256 = "877b3ec1130548b69af7f8aeef3ec9d3fc7738040f0b9beb490857ec970997ae"
 
 @dataclass(frozen=True)
 class ActionProposal:
@@ -11,6 +14,7 @@ class ActionProposal:
     chunk_id: int
     chunk_index: int
     is_chunk_start: bool
+    passive_gp_prediction: dict | None = None
 
     @property
     def action(self):
@@ -18,7 +22,7 @@ class ActionProposal:
 
 class Pi05PolicyAdapter:
     """Bridge batched LeRobot inference to LIBERO's seven-dimensional action."""
-    def __init__(self, policy, prepare_batch, postprocess_action=lambda x: x, *, task, execute_steps=10):
+    def __init__(self, policy, prepare_batch, postprocess_action=lambda x: x, *, task, execute_steps=10, passive_gp=None):
         if execute_steps < 1:
             raise ValueError("execute_steps must be positive")
         self.policy, self.prepare_batch = policy, prepare_batch
@@ -26,53 +30,78 @@ class Pi05PolicyAdapter:
         self.execute_steps = execute_steps
         self._queue = deque()
         self._chunk_id = self._chunk_index = 0
+        self.passive_gp = passive_gp
+        self._chunk_passive_gp_prediction = None
 
     @classmethod
     def from_pretrained(cls, checkpoint, *, task, execute_steps=10, local_files_only=True,
-                        env_config=None, device=None, dtype=None, cpu_output_heads=False):
+                        env_config=None, device=None, dtype=None, cpu_output_heads=False,
+                        meta_init=False, verify_placement_integrity=False, expected_weights_sha256=None,
+                        passive_gp=None):
         """Load a local checkpoint on demand; never download weights by default."""
         if local_files_only and not Path(checkpoint).exists():
             raise FileNotFoundError(f"local checkpoint does not exist: {checkpoint}")
         from lerobot.policies.pi05.modeling_pi05 import PI05Policy
         from lerobot.configs import PreTrainedConfig
         from safetensors.torch import load_file
+        import torch
 
         checkpoint = Path(checkpoint)
         weights = checkpoint / "model.safetensors"
         if not weights.is_file():
             raise FileNotFoundError(f"local checkpoint weights not found: {weights}")
+        if expected_weights_sha256 is not None:
+            digest = hashlib.sha256()
+            with weights.open("rb") as stream:
+                for block in iter(lambda: stream.read(8 * 1024 * 1024), b""):
+                    digest.update(block)
+            actual_sha256 = digest.hexdigest()
+            if actual_sha256 != expected_weights_sha256:
+                raise ValueError(f"checkpoint SHA-256 mismatch: expected {expected_weights_sha256}, got {actual_sha256}")
         config = PreTrainedConfig.from_pretrained(checkpoint, local_files_only=local_files_only)
         # Construct/load on CPU to avoid a second GPU copy. The pinned upstream
         # from_pretrained catches loading errors and can return random weights;
         # use its exact key conversion with strict loading and propagate failures.
-        config.device = "cpu"
-        # Compilation is an execution optimization, not part of learned weights.
-        # Avoid checkpoint training-time max-autotune compilation on a 10 GiB GPU.
+        # Meta initialization avoids allocating random CPU parameters beside the
+        # loaded checkpoint in memory-limited WSL environments.
+        config.device = "meta" if meta_init else "cpu"
         config.compile_model = False
         config.gradient_checkpointing = False
         if dtype is not None:
             config.dtype = dtype
-        policy = PI05Policy(config)
+        if meta_init:
+            with torch.device("meta"):
+                policy = PI05Policy(config)
+            if any(not parameter.is_meta for parameter in policy.parameters()):
+                raise RuntimeError("meta initialization produced materialized parameters")
+        else:
+            policy = PI05Policy(config)
         state = load_file(str(weights), device="cpu")
         converted = policy._convert_openpi_state_dict(state)
-        policy.load_state_dict(converted, strict=True)
+        policy.load_state_dict(converted, strict=True, assign=meta_init)
         del converted, state
+        if any(parameter.is_meta for parameter in policy.parameters()):
+            raise RuntimeError("strict checkpoint loading left meta parameters")
+        if meta_init:
+            from thesis_vla.placement import materialize_pi05_meta_buffers
+            policy.meta_buffer_reinitialization = materialize_pi05_meta_buffers(policy)
+        config.device = "cpu"
         policy.eval()
         if cpu_output_heads:
             from thesis_vla.placement import place_action_policy
-            policy.placement_report = place_action_policy(policy, device)
+            policy.placement_report = place_action_policy(policy, device, verify_integrity=verify_placement_integrity)
             policy.config.device = device
         elif device is not None:
             policy.to(device=device)
             policy.config.device = device
         return cls.from_lerobot_policy(
             policy, task=task, execute_steps=execute_steps, env_config=env_config,
-            pretrained_path=checkpoint,
+            pretrained_path=checkpoint, passive_gp=passive_gp,
         )
 
     @classmethod
     def from_lerobot_policy(cls, policy, *, task, execute_steps=10, env_config=None,
-                            pretrained_path=None):
+                            pretrained_path=None, passive_gp=None):
         """Wire an existing LeRobot π0.5 policy to the LIBERO evaluator.
 
         This constructor permits processor/contract tests with a mock inference
@@ -104,7 +133,8 @@ class Pi05PolicyAdapter:
         def process_action(chunk):
             return _process_chunk(chunk, policy_postprocessor, env_postprocessor, ACTION)
 
-        adapter = cls(policy, prepare, process_action, task=task, execute_steps=execute_steps)
+        adapter = cls(policy, prepare, process_action, task=task, execute_steps=execute_steps,
+                      passive_gp=passive_gp)
         adapter.prediction_state_capture = state_capture
         return adapter
 
@@ -118,6 +148,29 @@ class Pi05PolicyAdapter:
             if raw.shape[1] == 0 or not np.isfinite(raw).all():
                 raise ValueError("policy returned empty or non-finite actions")
             self.last_predicted_chunk = raw.astype(np.float32, copy=True)
+            self._chunk_passive_gp_prediction = None
+            if self.passive_gp is not None:
+                state = getattr(self, "prediction_state_capture", {}).get("vla_normalized")
+                state = np.asarray(state, dtype=np.float64) if state is not None else None
+                if state is None or state.shape != (8,) or not np.isfinite(state).all():
+                    raise ValueError("Passive GP requires the finite checkpoint-normalized 8D prediction state")
+                gp_started = __import__("time").perf_counter()
+                gp_mean, gp_std = self.passive_gp.predict(state)
+                round_trip_seconds = __import__("time").perf_counter() - gp_started
+                gp_mean = np.asarray(gp_mean, dtype=np.float64)
+                gp_std = np.asarray(gp_std, dtype=np.float64)
+                if gp_mean.shape != (7,) or gp_std.shape != (7,) or not np.isfinite(gp_mean).all() or not np.isfinite(gp_std).all() or np.any(gp_std <= 0):
+                    raise ValueError("Passive GP must return finite seven-action means and positive standard deviations")
+                self._chunk_passive_gp_prediction = {
+                    "input_state_vla_normalized": state.tolist(),
+                    "mean_raw_normalized_action": gp_mean.tolist(),
+                    "predictive_std_raw_normalized_action": gp_std.tolist(),
+                    "target_representation": "checkpoint-normalized pi0.5 horizon-zero action",
+                    "variance_definition": "latent posterior variance plus fixed observation noise",
+                    "model_sha256": getattr(self.passive_gp, "model_sha256", None),
+                    "worker_prediction_seconds": getattr(self.passive_gp, "last_worker_prediction_seconds", None),
+                    "worker_round_trip_seconds": getattr(self.passive_gp, "last_round_trip_seconds", round_trip_seconds),
+                }
             processed = self.postprocess_action(prediction)
             processed = processed.detach().cpu().numpy() if hasattr(processed, "detach") else np.asarray(processed)
             if processed.shape != raw.shape:
@@ -133,12 +186,14 @@ class Pi05PolicyAdapter:
         index = self._chunk_index
         self._chunk_index += 1
         predicted, executed = self._queue.popleft()
-        return ActionProposal(predicted, executed, self._chunk_id, index, index == 0)
+        return ActionProposal(predicted, executed, self._chunk_id, index, index == 0,
+                              self._chunk_passive_gp_prediction if index == 0 else None)
 
     def clear_action_queue(self):
         """Discard stale actions and clear policy temporal inference state."""
         self._queue.clear()
         self._chunk_index = 0
+        self._chunk_passive_gp_prediction = None
         reset = getattr(self.policy, "reset", None)
         if callable(reset):
             reset()

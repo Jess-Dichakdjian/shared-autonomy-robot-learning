@@ -18,8 +18,11 @@ def main() -> None:
     parser.add_argument("--final-test", action="store_true", help="Evaluate the locked test episodes; omit while inspecting validation/model choices.")
     parser.add_argument("--synthetic-data", action="store_true", help="Label the input as synthetic test data.")
     parser.add_argument("--verified-ucl-pi05", action="store_true", help="Require the documented UCL bundle checksum and 161-pair/20-episode schema before labeling results as real VLA-derived data.")
+    parser.add_argument("--verified-beast-pi05", action="store_true", help="Require the verified BEAST bundle checksum and 170-pair/20-episode schema before labeling results as BEAST real VLA-derived data.")
     args = parser.parse_args()
-    result = run_gp_experiment(args.data, args.output, args.config, evaluate_test=args.final_test, synthetic_data=args.synthetic_data, verified_ucl_dataset=args.verified_ucl_pi05)
+    result = run_gp_experiment(args.data, args.output, args.config, evaluate_test=args.final_test,
+        synthetic_data=args.synthetic_data, verified_ucl_dataset=args.verified_ucl_pi05,
+        verified_beast_dataset=args.verified_beast_pi05)
     print(json.dumps({"output_dir": result["output_dir"], "dataset_label": result["metrics"]["dataset_label"],
         "validation_gp_overall_mae": result["metrics"]["validation"]["gp"]["overall_mae"],
         "validation_ridge_overall_mae": result["metrics"]["validation"]["ridge"]["overall_mae"],

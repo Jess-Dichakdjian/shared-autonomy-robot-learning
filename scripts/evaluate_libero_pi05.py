@@ -40,6 +40,10 @@ def main():
     parser.add_argument("--output", type=Path, default=Path("outputs/pi05_libero"))
     parser.add_argument("--gl", choices=("osmesa", "egl", "glfw"), default="osmesa")
     parser.add_argument("--cpu-output-heads", action="store_true", help="retain unused vocabulary heads in CPU RAM with call guards")
+    parser.add_argument("--meta-init", action="store_true", help="strict-load weights into a meta-initialized model to reduce CPU load peak")
+    parser.add_argument("--verify-placement-integrity", action="store_true", help="hash model state before/after output-head placement")
+    parser.add_argument("--single-gpu-gate", action="store_true", help="run one real prediction and validate the single-GPU camera/state/action contract")
+    parser.add_argument("--verify-pinned-checkpoint", action="store_true", help="require the pinned v044 model.safetensors SHA-256")
     parser.add_argument("--prediction-gate", action="store_true", help="verify a real prediction and exact agreement with heads on the other GPU before evaluating")
     args = parser.parse_args()
 
@@ -76,6 +80,12 @@ def main():
             execute_steps=args.execute_steps, local_files_only=True, device=args.device,
             dtype=None if args.dtype == "auto" else getattr(torch, args.dtype),
             cpu_output_heads=args.cpu_output_heads,
+            meta_init=args.meta_init,
+            verify_placement_integrity=args.verify_placement_integrity or args.single_gpu_gate,
+            expected_weights_sha256=(
+                "877b3ec1130548b69af7f8aeef3ec9d3fc7738040f0b9beb490857ec970997ae"
+                if args.verify_pinned_checkpoint or args.single_gpu_gate else None
+            ),
         )
         policy_load_seconds = time.perf_counter() - load_started
         load_peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
@@ -90,7 +100,14 @@ def main():
             "dtype": str(getattr(model_config, "dtype", "checkpoint_default")),
             "compile_model": model_config.compile_model,
             "gradient_checkpointing": model_config.gradient_checkpointing,
-            "weight_loading": "strict_cpu_then_device",
+            "weight_loading": "strict_meta_assign_then_device" if args.meta_init else "strict_cpu_then_device",
+            "checkpoint_id": "lerobot/pi05_libero_finetuned_v044",
+            "checkpoint_revision": "7152f13e34c6c115d808aea0e5d08aca74eac14b",
+            "checkpoint_historical_alias": "lerobot/pi05_libero_finetuned",
+            "checkpoint_sha256": ("877b3ec1130548b69af7f8aeef3ec9d3fc7738040f0b9beb490857ec970997ae" if args.verify_pinned_checkpoint or args.single_gpu_gate else None),
+            "meta_init": args.meta_init,
+            "meta_buffer_reinitialization": getattr(policy.policy, "meta_buffer_reinitialization", []),
+            "single_gpu_gate": args.single_gpu_gate,
             "execute_steps": args.execute_steps, "seed_rule": "base_seed + episode_index",
             "torch_version": torch.__version__, "policy_load_seconds": policy_load_seconds,
             "process_peak_rss_bytes_after_load": load_peak_bytes,
@@ -104,6 +121,19 @@ def main():
             "prediction_gate_extra_resets": int(args.prediction_gate),
         }
         (args.output / "run_config.json").write_text(json.dumps(run_config, indent=2) + "\n")
+        if args.single_gpu_gate:
+            if not args.cpu_output_heads or cuda_device != torch.device("cuda:0") or len(monitored_devices) != 1:
+                raise ValueError("Single-GPU gate requires CPU output heads, --device cuda:0, and exactly one visible GPU")
+            from thesis_vla.placement import verify_single_gpu_placement, verify_single_gpu_action_contract
+            placement = verify_single_gpu_placement(policy.policy, cuda_device)
+            observation, _ = env.reset(seed=args.seed)
+            action_check = verify_single_gpu_action_contract(policy, observation, expected_chunk_steps=50)
+            policy.reset()
+            gate = {"passed": True, "placement": placement, "action_contract": action_check,
+                    "checkpoint_weight_loading": "strict",
+                    "numerical_comparison": "two-GPU reference unavailable on this one-GPU host"}
+            (args.output / "single_gpu_gate.json").write_text(json.dumps(gate, indent=2) + "\n")
+            print("SINGLE_GPU_GATE_PASSED " + json.dumps({"placement": placement, "action_contract": action_check}), flush=True)
         if args.prediction_gate:
             if not args.cpu_output_heads or cuda_device is None or len(monitored_devices) != 2:
                 raise ValueError("Prediction gate requires CPU output heads and exactly two visible CUDA GPUs")
