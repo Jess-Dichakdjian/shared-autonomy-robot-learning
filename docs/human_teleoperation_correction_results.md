@@ -1,98 +1,61 @@
-# Human teleoperation correction — Gates A–C
+# Human teleoperation correction interface: Gates A–D
 
-## Status and scope
+## Scope and status
 
-Gates A–C are implemented on BEAST's existing pinned Python 3.12 environment.
-The user's first browser attempt sent 16 human commands, then both camera frames
-became corrupted. Those commands and the video are preserved, but the visual
-failure means no grasp or task outcome is validated. No VLA, GP model, learned
-policy, or expert controller was used, and no task success is claimed. The
-thread-affinity fix below is ready for a fresh manual-control attempt.
+This change improves the existing human-only LIBERO teleoperation instrument on BEAST, on branch `feat/human-teleoperation-correction`. The VLA policy and its observations/actions are not changed. No pretrained policy, GP, XR device, intervention trigger, or learned correction is active. Automated movements reported here are controller validation, not human demonstrations or task-success evidence.
 
-The interface runs LIBERO-Spatial task 1, “pick up the black bowl next to the
-ramekin and place it on the plate,” from saved initial state 0 with seed 1101.
-The verified saved-state SHA-256 is
-`d116842e01703fbea595511db813a3816c8d9f2302b4e979ebec4f15b7a750a2`.
-Rendering uses the already-installed headless OSMesa path. Simulation physics
-and model dependencies were not changed.
+The test scenario is LIBERO-Spatial task 1: “pick up the black bowl next to the ramekin and place it on the plate,” saved initial state 0, seed 1101. The saved-state SHA-256 is `d116842e01703fbea595511db813a3816c8d9f2302b4e979ebec4f15b7a750a2`. Rendering uses the already-installed OSMesa path and a dedicated simulation-owner thread.
 
-## Verified OSC and gripper convention
+## Camera orientation and coordinates
 
-The pinned Robosuite `OSC_POSE` config uses `control_delta=true`, normalized
-inputs in `[-1,1]`, translation outputs of ±0.05 m per world-frame axis, and
-rotation-vector outputs of ±0.5 rad per axis. Relative translation is added to
-the current end-effector world position. The interface sends one action per
-key press; its translation slider bounds each increment to 1–20 mm and its
-rotation slider bounds each increment to 1–8 degrees. The gripper is controlled
-separately: Panda `-1` means open and `+1` means close. A gripper press advances
-one simulation control step; repeat deliberately with fresh observation between
-presses rather than assuming one command completes a grasp.
+Camera directions are computed from live MuJoCo local-to-world extrinsic rotations, then projected onto the tabletop plane. For each camera, local +X is image-right and local +Y is image-up. At the tested initial state, scene image-right aligns approximately with world +Y and image-up with world −X; wrist image-right aligns approximately with world −Y and image-up with world +X. The views are physically oriented in opposite yaw directions; neither canonical image is mirrored or rotated by the interface.
 
-Keys: W/S move ±world X; D/A move ±world Y; R/F move ±world Z. I/K, L/J and
-U/M rotate about the three configured axis-angle components. O opens and C
-closes the gripper. Space or the Pause button pauses command acceptance; Resume
-is explicit. Emergency Stop disables the session until its server process is
-restarted. Each request carries an epoch and increasing sequence number;
-concurrent commands are rejected without queueing. A lost connection does not
-cause client retries or background stepping. The server binds only to BEAST's
-`127.0.0.1`, never a LAN or Tailscale interface.
+The control reference selector offers Scene camera, Wrist camera, and World. World is +X forward, +Y right, +Z up. Scene/wrist forward and left/right use the selected camera's extrinsic tabletop basis. Height commands always use world ±Z. A camera-axis overlay shows the current projected image-right and image-up directions in world coordinates. These transformations affect teleoperation commands only. Raw simulator pixels remain the canonical observations and are written as lossless PNGs; the browser's JPEG preview and MP4 are display/evidence formats only.
 
-## Automated checks
+## Controls and bounded motion
 
-- 17 unit tests pass for all key-axis signs, the OSC scaling, bounds, invalid
-  inputs, and Panda gripper signs.
-- A real OSMesa LIBERO self-test reset the fixed task/state, applied three
-  automated W commands, measured end-effector world X from −0.208967 m to
-  −0.206362 m (positive displacement 0.002605 m), and reset back to the same
-  pinned state. This is a controller mapping check, **not human input**.
-- Both camera arrays were confirmed as 256×256 RGB and their initial-state
-  hashes matched the fixed scenario.
-- The first browser attempt exposed an OSMesa thread-affinity bug: camera
-  rendering performed from HTTP request threads returned corrupted frames.
-  The server now creates, steps and closes MuJoCo on one dedicated owner
-  thread; concurrent HTTP requests are rejected rather than queued. Regression
-  self-test on that exact owner thread passed after three mapped W actions and
-  reset: front-frame standard deviation 50.76/range 239; wrist-frame standard
-  deviation 64.02/range 245. The first attempt's trajectory and video are
-  preserved in the original run folder; the corrupted video is not evidence
-  of a valid visual demonstration.
-- The server offers a browser status endpoint and records each submitted human
-  command with before/after robot state, mapped/executed action, task status,
-  ownership and synchronized front/wrist video frames. Runtime logs and video
-  are written under ignored `outputs/` and must not be committed.
-- This worktree has no VLA handoff or resumption behavior yet. Those remain
-  intentionally deferred until the user has personally validated manual
-  control.
+- W/S: forward/backward in the selected frame; A/D: left/right; E/Q: up/down.
+- 1/2, 3/4, 5/6: positive/negative world axis-angle wrist rotation on axes 0, 1, 2.
+- V/G/H: open/close/hold gripper; Pause, Resume, and Emergency Stop have explicit controls.
+- Fine requests 2 mm, Normal 5 mm, and Coarse 30 mm. Requests are Cartesian targets; measured motion can differ because of controller response, contacts, and stopping tolerance.
+- A command is bounded to at most 7/10/18 simulator control steps for Fine/Normal/Coarse and 2.2 seconds. Fine/Normal/Coarse tolerances are 0.35/0.55/1.2 mm. The underlying OSC per-axis translation limit remains 50 mm per step, and the interface never queues commands.
+- Holding a direction repeats one segment every 250 ms. Each held input has a 0.75-second heartbeat lease and a five-second hard limit. Key/button release, browser blur, failed command/heartbeat, or lease expiry stops the sequence; server-side lease checks stop an in-progress multi-step command between simulator steps.
+- Open/close each run up to 20 control steps, stopping once the measured gripper aperture reaches its threshold or ceases changing; Hold sends one step.
 
-## Gate D — Lenovo instructions
+The fixed Robosuite OSC_POSE controller is delta-based with normalized inputs in [-1, 1], ±0.05 m translation per axis, and ±0.5 rad rotation-vector components. Panda gripper input −1 opens, +1 closes, and 0 holds.
 
-The BEAST server is intended to run at `http://127.0.0.1:8765` and accept
-connections only over an SSH local forward. From a Lenovo PowerShell window:
+## Validation results
+
+The teleoperation unit suite passed: `20 passed` on BEAST using the pinned Python 3.12 environment.
+
+The real LIBERO/OSMesa self-test ran from the pinned task/state on the dedicated `libero-simulator-owner` thread. It made 11 automated direction checks (World forward/right/up, Scene forward/backward/right/left, Wrist forward/backward/right/left); measured-direction alignment cosines ranged from 0.98247 to 0.99997. These checks validate the extrinsic mapping at this state; they are not human inputs.
+
+Measured end-effector travel in the same self-test was:
+
+| Preset | Requested | Measured |
+| --- | ---: | ---: |
+| Fine | 2 mm | 1.576 mm |
+| Normal | 5 mm | 6.536 mm |
+| Coarse | 30 mm | 29.500 mm |
+
+Fine < Normal < Coarse held. Normal overshot its request by about 1.54 mm (31%); the UI and log explicitly distinguish requested from measured displacement. These figures are one automated calibration from the fixed saved state, not an accuracy guarantee across poses or contacts.
+
+The gripper aperture proxy changed from 0.079973 open to 0.005579 closed and back to 0.076006 open over the bounded multi-step checks. This validates actuator response only; no object was grasped or lifted in the self-test.
+
+A previous manual browser run with 135 user-input records and its video is preserved in `outputs/human_teleop_task1_state0_seed1101_retry1/`. It is not overwritten by this server restart, and it is not claimed as a successful grasp/task. The earlier camera-corruption attempt is also preserved in `outputs/human_teleop_task1_state0_seed1101/`.
+
+## Research logging
+
+A new manual attempt uses a fresh output directory, `outputs/human_teleop_task1_state0_seed1101_retry2/`; the server refuses to start if that directory already exists. Each action record contains timestamps, task/run/seed/state provenance, keyboard/button input source, requested command, actual 7D executed OSC action, controller substep, before/after robot state, measured end-effector delta, reward and termination/success flags, plus the live camera extrinsics. Raw synchronized scene/wrist camera frames are saved losslessly with hashes. The MP4 is a side-by-side viewing copy. Runtime recordings, server logs and PID files are ignored by Git and must not be committed.
+
+## Manual validation required
+
+The server is bound only to BEAST loopback at `127.0.0.1:8765`; access is through an SSH local tunnel from the Lenovo:
 
 ```powershell
 ssh -N -L 8765:127.0.0.1:8765 friend-gpu
 ```
 
-Leave that PowerShell window open, then open `http://127.0.0.1:8765` in the
-Lenovo browser. Use one key press at a time and wait for fresh camera frames
-before the next. Start with 5 mm translation increments. Test the axes in open
-space, then move toward the bowl, open/close incrementally, and attempt a lift.
-Check visually that the bowl itself rises and remains held; the interface's
-task-success flag is separate from a grasp observation. Use Pause to stop
-commands, Resume only when ready, or Emergency Stop to disable control.
+Keep the tunnel terminal open and refresh `http://127.0.0.1:8765`. Start with Fine, Scene-camera reference, and the on-screen calibration checklist. Test each direction in open space, inspect the measured vector and both images, then test gripper open/close. Only approach the bowl if those checks look right. A grasp is verified only if the bowl visibly rises and stays held. Pause or use Emergency Stop whenever control is unclear. Close the browser and end the SSH tunnel with Ctrl+C when finished.
 
-When finished, close the browser and stop the tunnel with Ctrl+C in the
-PowerShell window. The simulation server can be stopped cleanly with:
-
-```powershell
-ssh friend-gpu "cd /home/jess/projects/shared-autonomy-robot-learning-human-teleop && test -f outputs/human_teleop_task1_state0_seed1101_retry1/server.pid && xargs -r kill -TERM < outputs/human_teleop_task1_state0_seed1101_retry1/server.pid"
-```
-
-Runtime trajectory and camera video are saved in the ignored
-`outputs/human_teleop_task1_state0_seed1101_retry1/` directory; the simulator
-server log is `outputs/teleop_server_retry1.log`. The first attempt remains
-preserved under `outputs/human_teleop_task1_state0_seed1101/`. Do not remove
-either folder before we review the human-operated test. After manual control
-works, the next step is
-to verify the recorded trajectory and only then implement the separate
-VLA-to-human-to-VLA handoff.
+The next dependency is the user's manual validation of the refreshed controls and frames. After that, inspect the new human-action records/video and verify a real grasp before implementing the separate VLA → human correction → VLA resumption sequence.
