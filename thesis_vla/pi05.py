@@ -159,7 +159,19 @@ class Pi05PolicyAdapter:
             if raw.ndim != 3 or raw.shape[0] != 1 or raw.shape[2] != 7:
                 raise ValueError(f"expected chunk shape (1, T, 7), got {raw.shape}")
             if raw.shape[1] == 0 or not np.isfinite(raw).all():
-                raise ValueError("policy returned empty or non-finite actions")
+                finite = raw[np.isfinite(raw)]
+                detail = {
+                    "shape": list(raw.shape),
+                    "nan_count": int(np.isnan(raw).sum()),
+                    "positive_inf_count": int(np.isposinf(raw).sum()),
+                    "negative_inf_count": int(np.isneginf(raw).sum()),
+                    "finite_min": float(finite.min()) if finite.size else None,
+                    "finite_max": float(finite.max()) if finite.size else None,
+                    "prediction_state_finite": bool(np.isfinite(
+                        getattr(self, "prediction_state_capture", {}).get("vla_normalized", [])
+                    ).all()),
+                }
+                raise ValueError(f"policy returned empty or non-finite actions: {detail}")
             self.last_predicted_chunk = raw.astype(np.float32, copy=True)
             self._chunk_passive_gp_prediction = None
             self._chunk_assistance_request = None

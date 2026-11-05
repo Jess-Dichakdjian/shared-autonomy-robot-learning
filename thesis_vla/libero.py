@@ -73,10 +73,21 @@ class LiberoVectorAdapter:
             state_metadata = {"saved_init_state_index": state_index,
                               "saved_init_state_sha256": hashlib.sha256(state.tobytes()).hexdigest(),
                               "saved_init_state_count": len(states)}
+        scenario = options.pop("scene_perturbation", None)
         obs, info = self.env.reset(seed=seed, options=options)
         info = self._first(info)
         info.update(state_metadata)
-        if state_metadata:
+        if scenario is not None:
+            from thesis_vla.perturbations import apply_scene_perturbation
+            if scenario.get("seed") != seed or scenario.get("saved_init_state_index") != state_index:
+                raise ValueError("scenario seed/state must match the reset request")
+            expected_state_sha = scenario.get("saved_init_state_sha256")
+            if expected_state_sha and expected_state_sha != info.get("saved_init_state_sha256"):
+                raise ValueError("scenario saved-state hash differs from the restored LIBERO state")
+            single = self.env.envs[0].unwrapped
+            obs, scene_record = apply_scene_perturbation(single, scenario)
+            info["scene_perturbation"] = scene_record
+        if state_metadata and "scene_perturbation" not in info:
             info["initial_camera_sha256"] = {k: hashlib.sha256(np.asarray(v).tobytes()).hexdigest()
                 for k, v in obs.get("pixels", {}).items()}
         return self._first(obs), info

@@ -14,8 +14,13 @@ class SceneEnv:
     def reset(self, *, seed, options):
         self.index=options["saved_init_state_index"]; self.step_index=0
         self.resets.append((seed,self.index))
-        return self.obs(), {"saved_init_state_index":self.index,
+        info = {"saved_init_state_index":self.index,
             "saved_init_state_sha256":hashlib.sha256(str(self.index).encode()).hexdigest(), "is_success":False}
+        if "scene_perturbation" in options:
+            scene = options["scene_perturbation"]
+            info["scene_perturbation"] = {"scenario_id":scene["scenario_id"],
+                "scenario_sha256":scene["scenario_sha256"]}
+        return self.obs(), info
     def obs(self):
         return {"state":np.array([self.index,self.step_index,0,0,0,0,0,0],np.float32),
             "robot_state":{"index":self.index,"step":self.step_index}}
@@ -102,3 +107,20 @@ def test_wilson_boundary_results():
     assert wilson(0,20)[0]==0
     assert wilson(20,20)[1]==1
     assert wilson(10,20)==pytest.approx([0.2992980082,0.7007019918])
+
+
+def test_scenario_plan_allows_distinct_scenes_from_same_saved_state(tmp_path):
+    from thesis_vla.perturbations import canonical_hash
+    scenes=[]
+    for i,shift in enumerate((0.02,-0.02)):
+        scene={"scenario_id":f"D{i}","scenario_sha256":canonical_hash({"shift":shift}),
+               "bowl_translation_xy_m":[shift,0.0]}
+        scenes.append({"episode_id":i,"seed":1101,"saved_init_state_index":0,
+                       "scenario_id":scene["scenario_id"],"scene_perturbation":scene})
+    env=SceneEnv()
+    result=run(env,policy(),tmp_path,total=2,pilot=2,scenario_specifications=scenes)
+    assert result["completed"]==2
+    assert env.resets==[(1101,0),(1101,0)]
+    records=completed_episodes(tmp_path)
+    assert {r["scenario_id"] for r in records}=={"D0","D1"}
+    assert len({r["scenario_sha256"] for r in records})==2

@@ -15,6 +15,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", type=Path, default=Path.home() / ".cache/huggingface/hub/models--lerobot--pi05_libero_finetuned_v044/snapshots/7152f13e34c6c115d808aea0e5d08aca74eac14b")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--scenario-plan", type=Path,
+                        help="Pre-registered scene manifest; held-out test scenarios are never executable.")
+    parser.add_argument("--scenario-split", choices=("discovery", "validation"), default="discovery")
+    parser.add_argument("--scene-validation", type=Path,
+                        help="Required physical-preflight report matching --scenario-plan")
+    parser.add_argument("--scenario-ids", nargs="+",
+                        help="Optional explicit scenario IDs for a bounded pilot or continuation")
     parser.add_argument("--suite", default="libero_spatial")
     parser.add_argument("--task-id", type=int, default=0)
     parser.add_argument("--total", type=int, default=20)
@@ -34,8 +41,52 @@ def main():
                         help="Fixed request budget for random_matched_budget over 28 possible chunks")
     parser.add_argument("--random-seed", type=int, default=20261104)
     args = parser.parse_args()
-    if not 1 <= args.pilot <= args.total <= 20 or args.base_seed < 0 or args.first_state < 0:
-        raise ValueError("Require 1 <= pilot <= total <= 20 and non-negative seed/state")
+    if args.base_seed < 0 or args.first_state < 0:
+        raise ValueError("Require non-negative seed/state")
+    scenario_specifications = None
+    scenario_manifest_sha256 = None
+    scene_validation_sha256 = None
+    scene_validation = None
+    if args.scenario_plan is not None:
+        from thesis_vla.perturbations import validate_scenario
+        if args.scene_validation is None:
+            raise ValueError("--scenario-plan requires a matching --scene-validation physical preflight")
+        scenario_manifest = json.loads(args.scenario_plan.expanduser().read_text(encoding="utf-8"))
+        scene_validation = json.loads(args.scene_validation.expanduser().read_text(encoding="utf-8"))
+        scenario_manifest_sha256 = hashlib.sha256(args.scenario_plan.expanduser().read_bytes()).hexdigest()
+        scene_validation_sha256 = hashlib.sha256(args.scene_validation.expanduser().read_bytes()).hexdigest()
+        if scene_validation.get("manifest_sha256") != scenario_manifest_sha256:
+            raise ValueError("physical preflight report belongs to a different scenario manifest")
+        valid_ids = {item["scenario_id"] for item in scene_validation.get("results", [])
+                     if item.get("status") == "valid"}
+        if scenario_manifest.get("schema_version") != 1 or scenario_manifest.get("task_id") != args.task_id:
+            raise ValueError("scenario plan schema/task does not match runner")
+        if scenario_manifest.get("final_test_status") != "reserved_not_run":
+            raise ValueError("scenario manifest does not mark final held-out test as reserved")
+        scenario_specifications = []
+        for candidate in scenario_manifest.get("scenarios", []):
+            if candidate.get("split") != args.scenario_split or candidate.get("scenario_id") not in valid_ids:
+                continue
+            if args.scenario_ids and candidate.get("scenario_id") not in set(args.scenario_ids):
+                continue
+            validate_scenario(candidate)
+            if candidate.get("task_id") != args.task_id:
+                raise ValueError("scenario task ID differs from runner")
+            scenario_specifications.append({
+                "episode_id": len(scenario_specifications),
+                "scenario_id": candidate["scenario_id"],
+                "seed": candidate["seed"],
+                "saved_init_state_index": candidate["saved_init_state_index"],
+                "scene_perturbation": candidate,
+            })
+        if not scenario_specifications:
+            raise ValueError(f"scenario manifest has no {args.scenario_split} scenarios")
+        if args.scenario_split == "discovery" and scenario_manifest.get("final_test_status") != "reserved_not_run":
+            raise ValueError("held-out test reservation is missing")
+        args.total = len(scenario_specifications)
+        args.pilot = min(args.pilot, args.total)
+    elif not 1 <= args.pilot <= args.total <= 20:
+        raise ValueError("Require 1 <= pilot <= total <= 20")
     if os.environ.get("CUDA_VISIBLE_DEVICES") != "0":
         raise ValueError("Set CUDA_VISIBLE_DEVICES=0 for the single-GPU BEAST run")
     if os.environ.get("MUJOCO_GL") != "osmesa":
@@ -108,8 +159,11 @@ def main():
     session.mkdir(parents=True, exist_ok=True)
     try:
         state_count = len(env.env.envs[0].unwrapped._init_states)
-        if args.first_state + args.total > state_count:
-            raise ValueError(f"Plan requests {args.first_state + args.total} states; LIBERO provides {state_count}")
+        requested_states = ([item["saved_init_state_index"] for item in scenario_specifications]
+                            if scenario_specifications is not None
+                            else list(range(args.first_state, args.first_state + args.total)))
+        if any(index < 0 or index >= state_count for index in requested_states):
+            raise ValueError(f"Scenario plan requests an unavailable initial state (count={state_count})")
         started = time.perf_counter()
         policy = Pi05PolicyAdapter.from_pretrained(
             checkpoint, task=task, env_config=config, execute_steps=10,
@@ -136,6 +190,7 @@ def main():
             "normalization": {k: str(v) for k, v in policy.policy.config.normalization_mapping.items()},
             "source_file_sha256": {name: digest(Path(__file__).resolve().parents[1] / name) for name in (
                 "scripts/benchmark_libero_pi05_beast.py", "thesis_vla/benchmark.py",
+                "thesis_vla/perturbations.py",
                 "thesis_vla/evaluation.py", "thesis_vla/pi05.py", "thesis_vla/placement.py",
                 "thesis_vla/libero.py", "thesis_vla/dataset.py",
                 "thesis_vla/gp/client.py", "scripts/gp_inference_worker.py")},
@@ -156,6 +211,15 @@ def main():
                 "action_effect": "passive; never modifies VLA predictions or executed actions",
             },
             "state_protocol": "one explicit saved state index per episode; gate reset is overridden by the episode plan",
+            "scene_scenario_manifest_sha256": scenario_manifest_sha256,
+            "scene_validation_sha256": scene_validation_sha256,
+            "scene_preflight_rejections": ([{"scenario_id": item.get("scenario_id"), "reason": item.get("reason")}
+                                           for item in scene_validation.get("results", [])
+                                           if item.get("status") != "valid"] if scene_validation else []),
+            "scenario_split": args.scenario_split if scenario_specifications is not None else None,
+            "selected_scenario_ids": ([item["scenario_id"] for item in scenario_specifications]
+                                      if scenario_specifications is not None else None),
+            "held_out_test_status": "reserved_not_run" if scenario_manifest_sha256 else None,
         }
         atomic_json(session / "load.json", {"load_seconds": time.perf_counter() - started, "identity": identity})
         observation, reset_info = env.reset(seed=args.base_seed, options={"saved_init_state_index": args.first_state})
@@ -175,6 +239,7 @@ def main():
             total=args.total, pilot=args.pilot, base_seed=args.base_seed,
             first_state=args.first_state, stop_after=args.stop_after,
             pilot_validator=lambda: export_dataset(args.output),
+            scenario_specifications=scenario_specifications,
         )
         dataset = export_dataset(args.output)
         from scripts.report_libero_benchmark import report

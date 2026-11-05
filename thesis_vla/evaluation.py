@@ -72,8 +72,22 @@ def run_evaluation(env, policy, output_dir: str | Path, *, episodes: int, base_s
                 import torch
                 inference_started = time.perf_counter()
                 act_started_at = time.time()
-                with torch.inference_mode():
-                    proposal = policy.act(observation)
+                try:
+                    with torch.inference_mode():
+                        proposal = policy.act(observation)
+                except Exception as error:
+                    diagnostic = {
+                        "error_type": type(error).__name__, "error": str(error),
+                        "seed": seed, "episode_id": configuration.get("episode_id", episode_index),
+                        "scenario_id": configuration.get("scenario_id"),
+                        "reset_info": _jsonable(reset_info),
+                        "observation": _observation_diagnostics(observation),
+                        "elapsed_seconds": time.time() - started_at,
+                    }
+                    (output / "evaluation_error.json").write_text(
+                        json.dumps(_jsonable(diagnostic), indent=2) + chr(10), encoding="utf-8"
+                    )
+                    raise
                 inference_seconds = time.perf_counter() - inference_started
                 if proposal.is_chunk_start:
                     prediction_step = step_count
@@ -98,6 +112,7 @@ def run_evaluation(env, policy, output_dir: str | Path, *, episodes: int, base_s
                     "success": found_success, "configuration": config_record,
                     "episode_id": configuration.get("episode_id", episode_index),
                     "saved_init_state_index": reset_info.get("saved_init_state_index"),
+                    "scene_perturbation": reset_info.get("scene_perturbation"),
                     "prediction_step": prediction_step,
                     "prediction_started_at": prediction_started_at,
                     "prediction_state": getattr(policy, "prediction_state_capture", {}),
@@ -225,3 +240,18 @@ def _peak_rss_bytes():
         return None
     # Linux reports KiB; macOS reports bytes.
     return int(peak if __import__("sys").platform == "darwin" else peak * 1024)
+
+
+def _observation_diagnostics(observation):
+    result = {"robot_state": _jsonable(observation.get("robot_state"))}
+    result["camera_views"] = {}
+    for key, value in observation.get("pixels", {}).items():
+        image = np.asarray(value)
+        result["camera_views"][key] = {
+            "shape": list(image.shape), "dtype": str(image.dtype),
+            "finite": bool(np.isfinite(image).all()),
+            "min": int(image.min()) if image.size else None,
+            "max": int(image.max()) if image.size else None,
+            "sha256": __import__("hashlib").sha256(image.tobytes()).hexdigest(),
+        }
+    return result

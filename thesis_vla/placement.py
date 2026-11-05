@@ -14,13 +14,20 @@ HEAD_PATHS = (
 )
 
 
+def _state_tensor_fingerprints(policy):
+    """Hash state tensors individually without keeping a second model copy."""
+    fingerprints = {}
+    for name, tensor in sorted(policy.state_dict().items()):
+        value = tensor.detach().to(device="cpu").contiguous().view(torch.uint8).numpy()
+        fingerprints[name] = hashlib.sha256(memoryview(value).cast("B")).hexdigest()
+    return fingerprints
+
+
 def _state_fingerprint(policy):
     """Hash state tensors incrementally without keeping a second model copy."""
     digest = hashlib.sha256()
-    for name, tensor in sorted(policy.state_dict().items()):
-        digest.update(name.encode("utf-8") + b"\0")
-        value = tensor.detach().to(device="cpu").contiguous().view(torch.uint8).numpy()
-        digest.update(memoryview(value).cast("B"))
+    for name, fingerprint in _state_tensor_fingerprints(policy).items():
+        digest.update(name.encode("utf-8") + b"\0" + fingerprint.encode("ascii"))
     return digest.hexdigest()
 
 
@@ -87,7 +94,15 @@ def place_action_policy(policy, device, *, verify_integrity=False):
             raise ValueError(f"Vocabulary head shares active parameter storage: {name}")
     if any(p.device.type != "cpu" for p in policy.parameters()):
         raise ValueError("Placement requires a strictly loaded CPU policy")
-    before_fingerprint = _state_fingerprint(policy) if verify_integrity else None
+    before_state = _state_tensor_fingerprints(policy) if verify_integrity else None
+    watched_name = "model.paligemma_with_expert.gemma_expert.model.layers.13.input_layernorm.dense.weight"
+    watched_before = (policy.get_parameter(watched_name).detach().cpu().clone()
+                      if verify_integrity and watched_name in dict(policy.named_parameters()) else None)
+    before_fingerprint = None
+    if before_state is not None:
+        before_fingerprint = hashlib.sha256("".join(
+            name + "\0" + value for name, value in before_state.items()
+        ).encode("ascii")).hexdigest()
 
     def move(module, path=""):
         if path in heads:
@@ -114,9 +129,20 @@ def place_action_policy(policy, device, *, verify_integrity=False):
         policy._preprocess_images = MethodType(preprocess_images, policy)
     report = placement_report(policy)
     if verify_integrity:
-        after_fingerprint = _state_fingerprint(policy)
+        after_state = _state_tensor_fingerprints(policy)
+        after_fingerprint = hashlib.sha256("".join(
+            name + "\0" + value for name, value in after_state.items()
+        ).encode("ascii")).hexdigest()
         if before_fingerprint != after_fingerprint:
-            raise RuntimeError("Model state changed during single-device placement")
+            changed = [name for name in before_state if before_state[name] != after_state.get(name)]
+            detail = ""
+            if watched_before is not None and watched_name in changed:
+                watched_after = policy.get_parameter(watched_name).detach().cpu()
+                delta = (watched_before.float() - watched_after.float()).abs()
+                detail = (f"; watched={tuple(watched_before.shape)} {watched_before.dtype}->{watched_after.dtype}"
+                          f" max_abs_delta={float(delta.max())} changed_values={int(torch.count_nonzero(delta))}"
+                          f" before={watched_before.flatten()[:4].tolist()} after={watched_after.flatten()[:4].tolist()}")
+            raise RuntimeError(f"Model state changed during single-device placement: {changed[:20]}{detail}")
         report["weight_integrity_sha256_before_after"] = before_fingerprint
         report["weight_integrity_comparison"] = "exact state_dict byte fingerprint before/after device placement"
     return report

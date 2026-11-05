@@ -34,10 +34,15 @@ def experiment_lock(output):
 
 
 class IndexedEpisodeEnv:
-    def __init__(self, env, state_index):
-        self.env, self.state_index = env, state_index
+    def __init__(self, env, specification):
+        self.env = env
+        self.specification = specification
+        self.state_index = specification["saved_init_state_index"]
     def reset(self, *, seed):
-        observation, info = self.env.reset(seed=seed, options={"saved_init_state_index": self.state_index})
+        options = {"saved_init_state_index": self.state_index}
+        if "scene_perturbation" in self.specification:
+            options["scene_perturbation"] = self.specification["scene_perturbation"]
+        observation, info = self.env.reset(seed=seed, options=options)
         if info.get("saved_init_state_index") != self.state_index:
             raise RuntimeError("Environment did not confirm requested saved initial state")
         return observation, info
@@ -124,7 +129,9 @@ def validate_episode(path, *, require_video=True, require_gp=True):
         if count != len(rows) + 1:
             raise ValueError("Incomplete video")
         files.append(episode["video"])
-    return {"episode_id": rows[0]["episode_id"], "seed": episode["seed"],
+    scene_record = episode.get("reset_info", {}).get("scene_perturbation", {})
+    return {"episode_id": rows[0]["episode_id"], "scenario_id": scene_record.get("scenario_id"),
+            "scenario_sha256": scene_record.get("scenario_sha256"), "seed": episode["seed"],
             "saved_init_state_index": episode["reset_info"]["saved_init_state_index"],
             "saved_init_state_sha256": episode["reset_info"]["saved_init_state_sha256"],
             "success": episode["success"], "steps": len(rows), "prediction_count": prediction_count,
@@ -158,14 +165,23 @@ def wilson(successes, total):
 
 
 def run_benchmark(env, policy, output, *, configuration, task, total=20, pilot=5,
-                  base_seed=0, first_state=0, record_video=True, stop_after=None, pilot_validator=None):
+                  base_seed=0, first_state=0, record_video=True, stop_after=None,
+                  pilot_validator=None, scenario_specifications=None):
+    if scenario_specifications is not None:
+        scenario_specifications = [dict(item) for item in scenario_specifications]
+        total = len(scenario_specifications)
     if not 1 <= total <= 20 or not 1 <= pilot <= total:
         raise ValueError("Require 1 <= pilot <= total <= 20")
     output = Path(output)
-    plan = {"schema_version": 1, "configuration": configuration, "task": task,
+    episode_plan = scenario_specifications if scenario_specifications is not None else [
+        {"episode_id": i, "seed": base_seed+i, "saved_init_state_index": first_state+i} for i in range(total)
+    ]
+    if len({item["episode_id"] for item in episode_plan}) != len(episode_plan):
+        raise ValueError("scenario episode IDs must be unique")
+    plan = {"schema_version": 2 if scenario_specifications is not None else 1,
+            "configuration": configuration, "task": task,
             "total": total, "pilot": pilot, "base_seed": base_seed, "first_state": first_state,
-            "timeout_steps": 280, "record_video": record_video,
-            "episodes": [{"episode_id": i, "seed": base_seed+i, "saved_init_state_index": first_state+i} for i in range(total)]}
+            "timeout_steps": 280, "record_video": record_video, "episodes": episode_plan}
     with experiment_lock(output):
         manifest = output / "experiment.json"
         if manifest.exists() and json.loads(manifest.read_text()) != plan:
@@ -195,7 +211,17 @@ def run_benchmark(env, policy, output, *, configuration, task, total=20, pilot=5
             if path.exists():
                 archive = output / "interrupted_attempts"
                 archive.mkdir(exist_ok=True)
-                path.rename(archive / f"episode_{i:03d}_{time.time_ns()}")
+                archived_attempt = archive / f"episode_{i:03d}_{time.time_ns()}"
+                path.rename(archived_attempt)
+                previous_progress = output / "progress.json"
+                if previous_progress.exists():
+                    previous = json.loads(previous_progress.read_text())
+                    if previous.get("status") == "error" and previous.get("current_episode", {}).get("episode_id") == i:
+                        atomic_json(archived_attempt / "attempt_error.json", {
+                            "error_type": previous.get("error_type"),
+                            "error": previous.get("error"),
+                            "scenario": previous.get("current_episode"),
+                        })
             update("running", current_episode=specification)
             try:
                 import torch
@@ -203,15 +229,25 @@ def run_benchmark(env, policy, output, *, configuration, task, total=20, pilot=5
                 devices = list(range(torch.cuda.device_count())) if configuration.get("device", "").startswith("cuda") and torch.cuda.is_available() else []
                 for d in devices:
                     torch.cuda.reset_peak_memory_stats(d)
-                run_evaluation(IndexedEpisodeEnv(env, specification["saved_init_state_index"]), policy, path,
+                run_evaluation(IndexedEpisodeEnv(env, specification), policy, path,
                                episodes=1, base_seed=specification["seed"], task=task,
                                configuration={**configuration, **specification}, max_steps=280,
                                record_video=record_video)
                 record = validate_episode(path, require_video=record_video)
                 record["attempt_started_at"] = attempt_started_at
                 record["attempt_ended_at"] = time.time()
-                if record["saved_init_state_sha256"] in {r["saved_init_state_sha256"] for r in done}:
+                scene_hash = record.get("scenario_sha256")
+                completed_scene_hashes = {
+                    row.get("scenario_sha256") for row in done if row.get("scenario_sha256")
+                }
+                if scene_hash and scene_hash in completed_scene_hashes:
+                    raise ValueError("Repeated scene configuration in benchmark plan")
+                if scenario_specifications is None and record["saved_init_state_sha256"] in {
+                    r["saved_init_state_sha256"] for r in done
+                }:
                     raise ValueError("Repeated saved scene state in benchmark plan")
+                record["scenario_id"] = specification.get("scenario_id")
+                record["scenario_sha256"] = scene_hash
                 record["gpu_allocator_peaks"] = {str(d): {"allocated": torch.cuda.max_memory_allocated(d),
                     "reserved": torch.cuda.max_memory_reserved(d),
                     "free_after_episode": torch.cuda.mem_get_info(d)[0]} for d in devices}
