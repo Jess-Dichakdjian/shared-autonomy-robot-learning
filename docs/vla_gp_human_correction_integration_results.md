@@ -49,14 +49,14 @@ VLA action records preserve raw normalized predictions separately from postproce
 - The live service reset the real LIBERO environment and rendered both camera feeds. The model and GP produced 70 VLA action steps over seven chunk boundaries. All predicted/executed action vectors were finite and seven-dimensional; executed actions were in range. GP predictions had finite seven-dimensional means and positive standard deviations at chunk boundaries.
 - Recorded per-call inference latency was 0.106 s mean and 4.283 s maximum, including warm-up. The seven GP calls used the CPU sidecar.
 - The policy did not complete the task before the requested handoff. At step 70, the GP uncertainty score was 0.8069, below the unchanged 0.8421 threshold. Therefore the handoff was the manual-request path, not a GP-generated trigger.
-- The automated preflight HTTP probe issued three repeated manual-request calls while polling a busy simulator. These were programmatic integration checks, not human inputs. The run's current `manual_operator_request` records must not be described as a genuine human request. The source code now makes repeated requests idempotent and records request origin; this running service was loaded before that small safeguard was added.
-- The current service is waiting in `ASSISTANCE_REQUESTED`. No human corrective action has been recorded; `human_corrections.jsonl` does not exist yet. No recovery, task success, or post-correction resumption is claimed. The user must accept the handoff and personally operate the cockpit.
+- The automated preflight HTTP probe issued three repeated manual-request calls while polling a busy simulator. These were programmatic integration checks, not human inputs. The preflight's recorded requests were programmatic and must not be conflated with the later operator-run handoffs. The source code now makes repeated requests idempotent and records request origin; this running service was loaded before that small safeguard was added.
+- At the step-70 programmatic preflight checkpoint, the service was waiting in `ASSISTANCE_REQUESTED`; no human correction had yet been recorded. The service remained live, and pi0.5 later terminated this episode successfully at step 112 with zero human-action steps. This is an autonomous task completion, separate from the subsequent operator-run result below.
 
 Raw evidence directory (ignored by Git):
 
 `outputs/vla_gp_human_correction_task1_state0_seed1101_20261105/`
 
-The active MP4 is still being written by the service. Final video/container validation and checksums should be done after the operator ends the run.
+The preflight MP4 was finalized after graceful shutdown and decoded successfully as 113 frames.
 
 ## Automated tests
 
@@ -64,4 +64,21 @@ The new tests cover state transitions, chunk-boundary gating, duplicate-request 
 
 ## Remaining gate
 
-The operator must use the localhost SSH tunnel, accept the pending handoff, perform a real correction in the cockpit, and return control to pi0.5. Afterwards inspect the generated correction record, both raw camera sequences, post-correction fresh-action marker, simulator outcome, finalized MP4, and evidence checksums. Only then can genuine corrective demonstration or recovery be reported.
+The first end-to-end human corrective handoff run has been captured and audited above. Additional episodes are required before making aggregate success or recovery claims. Investigate the measured 8.5 mm displacement for the 2 mm Fine request before treating Fine as precise placement control.
+
+
+## Verified BEAST operator run
+
+**Run:** `outputs/vla_gp_human_correction_task1_state0_seed1101_retry1_20261105/`
+**Scenario:** LIBERO-Spatial task 1, saved state 0, seed 1101, same pinned checkpoint and OSMesa renderer.
+
+- The operator manually requested the first handoff at step 50. The operator then generated 59 human action steps (steps 51-109; 38 button and 21 keyboard actions) and returned control to pi0.5.
+- pi0.5 resumed and acted through step 138. At step 139, the passive GP monitor independently requested another handoff at a chunk boundary (`gp_trigger`). This is the run's GP-triggered intervention; the first request was manual.
+- After accepting the GP-triggered handoff, the operator made one additional Fine Forward action at step 140 and returned control. The interface requested 2.0 mm and recorded 8.5 mm measured end-effector displacement, so fine preset displacement can overshoot in this contact state.
+- pi0.5 then executed 14 action steps (141-154). The episode outcome at step 154 recorded success=true, terminated=true, truncated=false. The final camera view shows the bowl on the plate.
+- The run contains 60 human action records in `human_corrections.jsonl` (39 button and 21 keyboard actions), two handoffs (one manual and one GP-triggered), 10 passive GP chunk predictions, and fresh policy inference after both corrections.
+- All 310 unique raw camera PNG references in the teleoperation log and all 124 unique before/after camera PNG references in the corrective records were present and matched their recorded pixel-array SHA-256 values. The finalized dual-camera MP4 decoded successfully as 155 frames. Shutdown GPU report recorded 7,126,723,584 peak allocated bytes and 7,291,797,504 peak reserved bytes on the RTX 5070 Ti Laptop GPU.
+
+This is one successful shared-autonomy episode, not a success-rate estimate. The success followed 60 human action steps and cannot be attributed to pi0.5 alone or to the GP trigger alone. Preserve the manual and GP-triggered handoffs as distinct conditions in analysis. The 8.5 mm displacement for a 2 mm Fine request should be investigated before treating Fine requests as precise motion.
+
+The raw run, corrective records, camera PNGs, MP4, and GPU report remain under Git-ignored `outputs/`; they are not included in the repository commit.
