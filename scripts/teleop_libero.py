@@ -83,6 +83,8 @@ class TeleopSession:
         self.last_action = None
         self.last_motion = None
         self.control_reference = "scene"
+        self.wrist_display_rotation_deg = 180
+        self.operator_view_history = []
         self.started_wall = time.time()
         self.log_path = output_dir / "teleoperation.jsonl"
         self.video_path = output_dir / "teleoperation.mp4"
@@ -133,8 +135,15 @@ class TeleopSession:
                 "task": TASK_TEXT, "seed": SEED, "saved_init_state_index": STATE_INDEX,
                 "saved_init_state_sha256": STATE_SHA256, "renderer": "OSMesa",
                 "camera_observations": {"scene": "agentview_image", "wrist": "robot0_eye_in_hand_image"},
-                "camera_display_transform": "none; raw RGB observations remain canonical",
+                "camera_display_transform": {
+                    "scene": "none",
+                    "wrist_default_rotation_deg": 180,
+                    "wrist_current_rotation_deg": self.wrist_display_rotation_deg,
+                    "scope": "browser presentation only; raw RGB observations, PNGs, hashes, and policy inputs are unchanged"},
                 "control_reference_default": self.control_reference,
+                "operator_view_initial": {"control_reference": "scene", "wrist_display_rotation_deg": 180},
+                "operator_view_current": self._operator_view(),
+                "operator_view_history": self.operator_view_history,
                 "presets": PRESETS, "max_command_seconds": MAX_COMMAND_SECONDS,
                 "hold_heartbeat_lease_seconds": HOLD_LEASE_SECONDS,
                 "hold_hard_timeout_seconds": HOLD_MAX_SECONDS,
@@ -192,6 +201,7 @@ class TeleopSession:
                    "task_id": TASK_ID, "seed": SEED, "saved_init_state_index": STATE_INDEX,
                    "saved_init_state_sha256": STATE_SHA256, "camera_files": captures,
                    "robot_state": _plain(self.observation["robot_state"]),
+                   "operator_view": self._operator_view(),
                    "camera_extrinsics": _jsonable_axes(self.camera_axes)})
 
     def _state(self):
@@ -200,6 +210,21 @@ class TeleopSession:
     def _image_display(self):
         pix = self.observation["pixels"]
         return {"scene": _jpeg(pix["image"]), "wrist": _jpeg(pix["image2"])}
+
+    def _operator_view(self, *, control_reference=None, wrist_rotation=None):
+        reference = self.control_reference if control_reference is None else control_reference
+        rotation = self.wrist_display_rotation_deg if wrist_rotation is None else wrist_rotation
+        return {"control_reference": reference,
+                "wrist_display_rotation_deg": rotation,
+                "display_transform_applied_to_control": reference == "wrist" and rotation == 180}
+
+    def _record_operator_view_change(self, record_type):
+        entry = {"record_type": record_type, "time_unix": time.time(),
+                 **self._operator_view(),
+                 "camera_extrinsics": _jsonable_axes(self.camera_axes)}
+        self.operator_view_history.append({k: v for k, v in entry.items() if k != "camera_extrinsics"})
+        self._log(entry)
+        self._write_config()
 
     def snapshot(self):
         state = self._state()
@@ -218,6 +243,8 @@ class TeleopSession:
                 "terminated": self.terminated, "truncated": self.truncated,
                 "last_action": self.last_action, "last_motion": self.last_motion,
                 "control_reference": self.control_reference,
+                "wrist_display_rotation_deg": self.wrist_display_rotation_deg,
+                "operator_view": self._operator_view(),
                 "camera_axes": _jsonable_axes(self.camera_axes),
                 "video_status": self.video_error or ("recording" if self.video is not None else "ready"),
                 "images": self._image_display()}
@@ -281,9 +308,20 @@ class TeleopSession:
         try:
             self.stop_hold()
             self.control_reference = reference
-            self._log({"record_type": "control_reference", "run_id": self.run_id,
-                       "time_unix": time.time(), "owner": "HUMAN", "reference": reference,
-                       "camera_extrinsics": _jsonable_axes(self.camera_axes)})
+            self._record_operator_view_change("operator_view_change")
+            return self.snapshot()
+        finally:
+            self.lock.release()
+
+    def set_wrist_display_rotation(self, rotation_deg):
+        if isinstance(rotation_deg, bool) or rotation_deg not in {0, 180}:
+            raise ValueError("wrist display rotation must be 0 or 180 degrees")
+        if not self.lock.acquire(blocking=False):
+            raise RuntimeError("simulator busy; try again after the action completes")
+        try:
+            self.stop_hold()
+            self.wrist_display_rotation_deg = int(rotation_deg)
+            self._record_operator_view_change("operator_view_change")
             return self.snapshot()
         finally:
             self.lock.release()
@@ -350,6 +388,7 @@ class TeleopSession:
                    "robot_state_before": before, "robot_state_after": after,
                    "measured_eef_delta_world_m": delta.astype(float).tolist(),
                    "camera_files": captures, "camera_extrinsics": _jsonable_axes(self.camera_axes),
+                   "operator_view": self._operator_view(),
                    "reward": reward, "is_success": bool(self.last_info.get("is_success", False)),
                    "terminated": terminated, "truncated": truncated})
         return after, delta
@@ -367,11 +406,13 @@ class TeleopSession:
         camera_scene = {k: np.asarray(v) for k, v in self.camera_axes["scene"].items()}
         camera_wrist = {k: np.asarray(v) for k, v in self.camera_axes["wrist"].items()}
         requested = world_delta_for_direction(direction, cfg["distance_m"], reference=reference,
-                                               scene_basis=camera_scene, wrist_basis=camera_wrist)
+                                               scene_basis=camera_scene, wrist_basis=camera_wrist,
+                                               wrist_display_rotation_deg=self.wrist_display_rotation_deg)
         start_pos = np.asarray(self.observation["robot_state"]["eef"]["pos"], dtype=float).copy()
         start_mono = time.monotonic()
         command = {"kind": "move", "direction": direction, "preset": preset,
                    "control_reference": reference, "requested_controller_displacement_m": requested.tolist(),
+                   "operator_view": self._operator_view(control_reference=reference),
                    "requested_distance_m": cfg["distance_m"], "input_method": input_method,
                    "hold_id": hold_id, "sequence": seq}
         max_steps = cfg["max_steps"]
@@ -624,6 +665,41 @@ def _calibration_self_test():
                                 "requested_m": motion["requested_controller_displacement_m"],
                                 "measured_m": motion["measured_eef_displacement_m"],
                                 "cosine": cosine, "steps": motion["controller_steps"]})
+            # Validate both wrist display orientations against the same live
+            # camera extrinsics. This is automated controller testing only.
+            for display_rotation in (0, 180):
+                worker.invoke(lambda rotation=display_rotation: session.set_wrist_display_rotation(rotation))
+                body = {"kind": "move", "direction": "forward", "preset": "fine", "reference": "wrist",
+                        "input_method": "automated_test"}
+                response = run_command(body)
+                motion = response["last_motion"]
+                if motion["direction_alignment_cosine"] < .30:
+                    raise RuntimeError(f"wrist display {display_rotation} direction mismatch: {motion}")
+                results.append({"reference": "wrist", "display_rotation_deg": display_rotation,
+                                "direction": "forward", "requested_m": motion["requested_controller_displacement_m"],
+                                "measured_m": motion["measured_eef_displacement_m"],
+                                "cosine": motion["direction_alignment_cosine"], "steps": motion["controller_steps"]})
+            previous_wrist_right = np.asarray(session.camera_axes["wrist"]["right_world"]).copy()
+            rotate_body = {"kind": "rotate", "axis": 2, "sign": 1, "preset": "fine",
+                           "reference": "wrist", "input_method": "automated_test"}
+            run_command(rotate_body)
+            current_wrist_right = np.asarray(session.camera_axes["wrist"]["right_world"]).copy()
+            if np.linalg.norm(current_wrist_right - previous_wrist_right) < 1e-4:
+                raise RuntimeError("wrist camera extrinsics did not update after end-effector rotation")
+            worker.invoke(lambda: session.set_wrist_display_rotation(180))
+            rotated_body = {"kind": "move", "direction": "right", "preset": "fine", "reference": "wrist",
+                            "input_method": "automated_test"}
+            rotated_response = run_command(rotated_body)
+            rotated_motion = rotated_response["last_motion"]
+            if rotated_motion["direction_alignment_cosine"] < .30:
+                raise RuntimeError(f"post-rotation wrist mapping did not align: {rotated_motion}")
+            results.append({"reference": "wrist", "display_rotation_deg": 180,
+                            "direction": "right_after_camera_rotation",
+                            "camera_right_world_before": previous_wrist_right.tolist(),
+                            "camera_right_world_after": current_wrist_right.tolist(),
+                            "measured_m": rotated_motion["measured_eef_displacement_m"],
+                            "cosine": rotated_motion["direction_alignment_cosine"],
+                            "steps": rotated_motion["controller_steps"]})
             # Preset speed check: coarse target must yield more measured travel than fine.
             base = np.asarray(session.observation["robot_state"]["eef"]["pos"], dtype=float).copy()
             b = {"kind": "move", "direction": "forward", "preset": "fine", "reference": "world",
@@ -653,11 +729,22 @@ def _calibration_self_test():
             q2 = session._aperture_proxy(session._state())
             if not (q1 < q0 and q2 > q1):
                 raise RuntimeError(f"gripper did not close then open: {q0:.5f}->{q1:.5f}->{q2:.5f}")
+            with session.log_path.open(encoding="utf-8") as stream:
+                logged = [json.loads(line) for line in stream]
+            action_rows = [row for row in logged if row.get("record_type") == "human_action_step"]
+            if not action_rows or any(
+                    len(row.get("executed_action_7d", [])) != 7
+                    or "operator_view" not in row
+                    or any(len(row.get("camera_files", {}).get(cam, {}).get("sha256", "")) != 64
+                           for cam in ("scene", "wrist"))
+                    for row in action_rows):
+                raise RuntimeError("simulator logs lack 7D action, operator view, or raw-camera hashes")
             return {"SELF_TEST": "PASS", "task_id": TASK_ID, "seed": SEED,
                     "state_sha256": STATE_SHA256, "camera_direction_checks": results,
                     "fine_measured_m": fine_distance, "normal_measured_m": normal_distance,
                     "coarse_measured_m": coarse_distance,
                     "gripper_aperture_proxy_close_open": [q0, q1, q2],
+                    "action_log_records_checked": len(action_rows),
                     "owner_thread": worker.thread.name, "human_input": False, "vla_loaded": False}
         finally:
             worker.close()
@@ -733,6 +820,9 @@ def main():
                     self._send(200, result); return
                 if self.path == "/api/reference":
                     result = session.set_reference(self._body().get("reference"))
+                    self._send(200, result); return
+                if self.path == "/api/display":
+                    result = session.set_wrist_display_rotation(self._body().get("wrist_rotation_deg"))
                     self._send(200, result); return
                 if self.path == "/api/action":
                     body = self._body()

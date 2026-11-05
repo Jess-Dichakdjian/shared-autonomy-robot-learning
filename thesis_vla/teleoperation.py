@@ -91,7 +91,8 @@ def camera_plane_basis(camera_rotation):
 
 
 def world_delta_for_direction(direction, distance_m, *, reference="world",
-                              scene_basis=None, wrist_basis=None):
+                              scene_basis=None, wrist_basis=None,
+                              wrist_display_rotation_deg=0):
     """Map an operator's direction into bounded world-frame metres.
 
     World convention is +X forward, +Y right, +Z up. Scene/wrist forward and
@@ -108,6 +109,8 @@ def world_delta_for_direction(direction, distance_m, *, reference="world",
         raise ValueError("distance must be a finite positive number") from exc
     if not math.isfinite(distance) or not 0.0 < distance <= TRANSLATION_LIMIT_M:
         raise ValueError("distance must be greater than zero and no more than 0.05 m")
+    if wrist_display_rotation_deg not in {0, 180}:
+        raise ValueError("wrist display rotation must be 0 or 180 degrees")
     if direction in {"up", "down"}:
         axis = np.asarray([0.0, 0.0, 1.0])
         sign = 1.0 if direction == "up" else -1.0
@@ -133,6 +136,11 @@ def world_delta_for_direction(direction, distance_m, *, reference="world",
         if norm < 1e-8:
             raise ValueError("camera basis direction has no tabletop projection")
         axis /= norm
+        # A 180-degree display rotation reverses both on-screen planar axes.
+        # Apply this only for wrist-reference input; scene and world controls
+        # remain invariant to the wrist presentation setting.
+        if reference == "wrist" and wrist_display_rotation_deg == 180:
+            axis = -axis
         sign = -1.0 if direction in {"backward", "left"} else 1.0
     result = sign * distance * axis
     if result.shape != (3,) or not np.all(np.isfinite(result)):
